@@ -28,7 +28,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        self._send({"ok": True, "name": "exit-interview"})
+        self._send(room.info(self.path))
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get("content-length") or 0))

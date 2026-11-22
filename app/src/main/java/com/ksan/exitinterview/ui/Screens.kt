@@ -28,6 +28,7 @@ import com.ksan.exitinterview.app.GameApp
 import com.ksan.exitinterview.app.Overlay
 import com.ksan.exitinterview.app.Screen
 import com.ksan.exitinterview.engine.Rules
+import com.ksan.exitinterview.engine.ServerAddress
 
 @Composable
 fun AppRoot(game: GameApp) {
@@ -147,7 +148,7 @@ private fun SettingsScreen(game: GameApp) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Label("設定", 26.sp, color = Ui.Accent)
         PlainButton(if (game.soundOn) "音：オン" else "音：オフ", 17.sp) { game.toggleSound() }
-        val host = game.server.substringAfter("//").substringBefore("/").take(34)
+        val host = ServerAddress.host(game.server).take(34)
         Label(if (game.hasServer()) "サーバー：$host" else "サーバー：未設定", 14.sp, color = Ui.Dim)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlainButton("クリップボードから貼り付け", 15.sp) { game.pasteServer() }

@@ -29,6 +29,29 @@ class HttpTransport(private val url: String) : Transport {
     }
 }
 
+/**
+ * The server setting a player pastes in. Two spellings:
+ *  - "https://host/k/KEY": what a deploy prints, and what KsanHub keeps as the site's URL
+ *  - "http://host:8080/#KEY": the older form, still used for a server on your own computer (the key may be empty)
+ * Returns the address to post to and the key, or null when the text is neither.
+ */
+object ServerAddress {
+    private val keyed = Regex("""^(https?://[^/?#]+)/k/([A-Za-z0-9_-]+)/?$""")
+
+    fun parse(text: String): Pair<String, String>? {
+        val t = text.trim()
+        if (!t.startsWith("http://") && !t.startsWith("https://")) return null
+        if (t.any { it.isWhitespace() }) return null
+        val hash = t.indexOf('#')
+        if (hash >= 0) return if (t.substring(0, hash).length > "https://".length) Pair(t.substring(0, hash), t.substring(hash + 1)) else null
+        val m = keyed.find(t) ?: return null
+        return Pair(m.groupValues[1] + "/", m.groupValues[2])
+    }
+
+    /** The host, for showing which server is set without showing the key. */
+    fun host(text: String): String = (parse(text)?.first ?: "").substringAfter("//").substringBefore("/")
+}
+
 /** The same protocol as the real server, kept in memory. Used for offline solo tests. */
 class LocalTransport(private val clock: () -> Int = { (System.currentTimeMillis() / 1000).toInt() }) : Transport {
     private class Room(val code: String, st: GameState, val mode: String, var p0: String) {

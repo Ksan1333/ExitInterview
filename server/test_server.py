@@ -81,6 +81,14 @@ else:
         r = room.lambda_handler(ev, None)
         check(r["statusCode"] == 200 and '"ok": true' in r["body"], "lambda handler answers a Function URL event")
         check('"name"' in room.lambda_handler({"requestContext": {"http": {"method": "GET"}}}, None)["body"], "lambda handler answers a browser visit")
+        get = lambda path: json.loads(room.lambda_handler({"requestContext": {"http": {"method": "GET"}}, "rawPath": path}, None)["body"])
+        room.BUILD = {"tree": "abc123", "deployedAt": "2026-11-22T09:00:00Z"}
+        check(get("/build.json") == room.BUILD and get("/k/SECRET/build.json") == room.BUILD, "build.json is served at the root and under a key path")
+        check("tree" not in get("/") and "tree" not in get("/k/SECRET"), "other paths only show a sign of life")
+        check("SECRET" not in json.dumps(get("/k/SECRET")), "a GET never echoes a key")
+
+check(room.info("/build.json?t=1") == room.BUILD and room.info("/x/build.json/") == room.BUILD and room.info(None) == {"ok": True, "name": "exit-interview"},
+      "build.json is found with a query string or a trailing slash")
 
 print("ALL OK" if not FAILS else "%d FAILED" % len(FAILS))
 sys.exit(1 if FAILS else 0)

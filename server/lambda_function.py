@@ -17,6 +17,26 @@ ROOM_DAYS = 30
 MAX_STATE = 60000
 
 
+def _build():
+    """What a deploy wrote beside this file: which commit's server folder is running, and since when."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "build.json"), encoding="utf-8") as fh:
+            found = json.load(fh)
+        return found if isinstance(found, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+BUILD = _build()
+
+
+def info(path):
+    """The answer to a GET: build.json (read by KsanHub to tell whether the deploy is current) or a sign of life."""
+    if (path or "").split("?")[0].rstrip("/").endswith("/build.json"):
+        return BUILD
+    return {"ok": True, "name": "exit-interview"}
+
+
 class MemStore:
     """Rooms kept in memory (local server and tests)."""
 
@@ -210,7 +230,7 @@ def lambda_handler(event, context):
     global _store
     method = (event.get("requestContext", {}).get("http", {}) or {}).get("method", "POST")
     if method != "POST":
-        body = {"ok": True, "name": "exit-interview"}
+        body = info(event.get("rawPath"))
     else:
         raw = event.get("body") or "{}"
         if event.get("isBase64Encoded"):
@@ -222,4 +242,5 @@ def lambda_handler(event, context):
         if _store is None:
             _store = DynamoStore(TABLE)
         body = handle(q, _store)
-    return {"statusCode": 200, "headers": {"content-type": "application/json"}, "body": json.dumps(body, ensure_ascii=False)}
+    return {"statusCode": 200, "headers": {"content-type": "application/json", "cache-control": "no-store"},
+            "body": json.dumps(body, ensure_ascii=False)}

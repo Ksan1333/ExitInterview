@@ -3,9 +3,10 @@
 #   1. rebuilds the stage pack and confirms the build is reproducible
 #   2. engine + real stage pack: walkthrough, skips, dead-end search, two players (in memory and over HTTP)
 #   3. room server against memory and a DynamoDB mock
-#   4. deploy.sh carries the current server code
-#   5. the app's Kotlin type-checks against stand-ins for Android and Compose
-# Needs: Python 3 (Pillow, cryptography; optional boto3 + moto), rsvg-convert, the Yomogi font, Java, a Gradle install.
+#   4. deploy.sh carries the current server code, and deploys and removes cleanly against a mock of AWS
+#   5. the engine's handling of the server setting
+#   6. the app's Kotlin type-checks against stand-ins for Android and Compose
+# Needs: Python 3 (Pillow, cryptography; optional boto3, moto[server], awscli), rsvg-convert, the Yomogi font, Java, a Gradle install.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 FAIL=0
@@ -35,8 +36,16 @@ grep -v "^ok" /tmp/ei-server.log
 step "4. deploy script"
 python3 server/make_deploy.py --check || FAIL=1
 bash -n server/deploy.sh && bash -n server/remove.sh || FAIL=1
+python3 server/test_deploy.py > /tmp/ei-deploy.log 2>&1 || FAIL=1
+grep -c "^ok" /tmp/ei-deploy.log | sed 's/^/checks passed: /'
+grep -v "^ok" /tmp/ei-deploy.log
 
-step "5. app type-check"
+step "5. engine parts outside the stages"
+tools/kt.sh /tmp/ei-enginecheck EngineCheckKt tools/enginecheck > /tmp/ei-engine.log 2>&1 || FAIL=1
+grep -c "^ok" /tmp/ei-engine.log | sed 's/^/checks passed: /'
+grep -v "^ok" /tmp/ei-engine.log
+
+step "6. app type-check"
 tools/typecheck/run.sh > /tmp/ei-type.log 2>&1
 grep -q "TYPECHECK OK" /tmp/ei-type.log || FAIL=1
 grep -v "warning:\|^ *\^\|^        val c = URL" /tmp/ei-type.log

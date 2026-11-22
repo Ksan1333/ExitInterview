@@ -33,18 +33,59 @@
 - Gradle JDK は 17〜21 を選んでください（Settings → Build Tools → Gradle → Gradle JDK）。
 - GitHub Actions は使いません。
 
-## サーバーを置く（AWS CloudShell）
+## サーバーを置く
+
+置き方は2つあります。どちらも同じ [`server/deploy.sh`](server/deploy.sh) を使い、何度実行しても同じ結果になります（2回目からは関数の中身だけ入れ替えます）。
+
+### KsanHub から（「AWS に配置」）
+
+KsanHub の一覧（`Ksan1333/scoop-bucket` の `catalog.json`）に、次の項目を足しておきます。`group` などの見た目の項目は、一覧のほかの Web アプリに合わせてください。
+
+```json
+{
+  "id": "exitinterview-server",
+  "name": "Exit Interview（部屋サーバー）",
+  "kind": "web",
+  "tagline": "2人用脱出ゲーム Exit Interview の部屋サーバー（Lambda と DynamoDB）",
+  "repo": "Ksan1333/ExitInterview",
+  "deployScript": "server/deploy.sh",
+  "treePath": "server",
+  "group": "web"
+}
+```
+
+1. KsanHub の「Exit Interview（部屋サーバー）」で「AWS に配置」を押す。
+2. 終わると、サーバーの URL（`https://…on.aws/k/…`）が KsanHub に登録される。カードの「URL」で見られる。
+3. その URL をコピーし、ゲームの「設定」→「クリップボードから貼り付け」。友人にも同じ URL を送って、同じ操作をしてもらう。
+
+- スクリプトは最後に `KSANHUB_SITE_URL=<URL>` の行を出します。KsanHub はこれをサイトの URL として覚えます。
+- 配置が最新かどうかは、`server` フォルダのハッシュで比べます。配置した版は `<URL>/build.json`（`tree` と `deployedAt`）で返します。
+- URL の `/k/` の後ろは鍵です。この URL を知っている人だけが部屋を作れます。公開の場所（このリポジトリを含む）に書かないでください。
+- 配置に使う鍵（KsanHub の配置用ロール）には、次の操作の権限が要ります。足りないと、最初の配置が AccessDenied で止まります。
+
+| サービス | 操作 | 対象 |
+| --- | --- | --- |
+| DynamoDB | DescribeTable、CreateTable、UpdateTimeToLive（ListTables は表示用で、なくても進む） | テーブル `ExitInterviewRooms` |
+| IAM | GetRole、CreateRole、AttachRolePolicy、PutRolePolicy、PassRole | ロール `exit-interview-lambda` |
+| Lambda | GetFunction、GetFunctionConfiguration、CreateFunction、UpdateFunctionCode、GetFunctionUrlConfig、CreateFunctionUrlConfig、AddPermission、PutFunctionConcurrency | 関数 `exit-interview-rooms` |
+| STS | GetCallerIdentity | |
+
+2回目からは、IAM の書き直しができない鍵でも、関数の中身の入れ替えまでは進みます。
+
+### AWS CloudShell に貼り付ける
 
 1. AWS コンソールで CloudShell を開く。
 2. [`server/deploy.sh`](server/deploy.sh) の中身を全部コピーして貼り付け、Enter。
-3. 最後に出る `https://…on.aws/#…` の1行が「サーバーの合言葉」。
+3. 最後に出る `https://…on.aws/k/…` の1行が、サーバーの URL。
 
-この合言葉をアプリに入れる方法は2つあります。
+貼り付けて置いたときは、どのコミットの版かを控えられないので、KsanHub では「配置の版不明」と出ます（遊ぶぶんには影響ありません）。
 
-- アプリで入れる：合言葉をコピー → アプリの「設定」→「クリップボードから貼り付け」。友人も同じ操作をする。
-- APK に入れる：`app/src/main/assets/server.txt` にその1行を書いてビルドする。友人は何もしなくてよい。
+### サーバーの URL をゲームに入れる
 
-消すときは [`server/remove.sh`](server/remove.sh) を貼り付けます。
+- アプリで入れる（おすすめ）：URL をコピー → アプリの「設定」→「クリップボードから貼り付け」。友人も同じ操作をする。
+- APK に入れる：`app/src/main/assets/server.txt` にその1行を書いてビルドする。友人は何もしなくてよい。ただしこのリポジトリは公開なので、書いた `server.txt` はコミットしないでください。
+
+消すときは [`server/remove.sh`](server/remove.sh) を CloudShell に貼り付けます。
 
 ### 手元のPCで動かす（予備）
 
@@ -52,7 +93,7 @@
 python3 server/local_server.py 8080
 ```
 
-同じネットワークの端末から `http://<PCのアドレス>:8080/#` を合言葉として入れます（`#` の後ろは空でよい）。
+同じネットワークの端末から `http://<PCのアドレス>:8080/#` をサーバーの URL として入れます（`#` の後ろは空でよい）。
 
 ## 遊び方
 
@@ -79,7 +120,9 @@ tools/verify.sh
 | --- | --- |
 | ステージ | 模範解答の通し、全13問のスキップ、行き止まりの探索、間違えたときの動き |
 | 同期 | 2人が同時に操作しても取りこぼさないこと（メモリ内と HTTP 経由） |
-| サーバー | メモリ版と DynamoDB のモックに対する動作 |
+| サーバー | メモリ版と DynamoDB のモックに対する動作。`build.json` の返し方 |
+| 配置 | `server/deploy.sh` と `server/remove.sh` を、AWS のモック（moto）に対して最初から最後まで実行する（クローンから・貼り付け・権限の足りない鍵・消してからの再配置） |
+| サーバーの URL | アプリが URL と鍵を正しく読み分けること |
 | アプリ | Android と Compose の代用品に対する型検査（実ビルドの代わりにはならない） |
 
 ## 使っているもの

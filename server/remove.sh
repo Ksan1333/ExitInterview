@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Exit Interview のサーバーを AWS から消します（CloudShell 用）。部屋のデータも消えます。
-export AWS_DEFAULT_REGION="${EI_REGION:-ap-southeast-2}" AWS_PAGER=""
+# Exit Interview のサーバーを AWS から消します（CloudShell に貼り付けるか、bash server/remove.sh）。部屋のデータも消えます。
+EI_R="${EI_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-ap-southeast-2}}}"
+export AWS_REGION="$EI_R" AWS_DEFAULT_REGION="$EI_R" AWS_PAGER=""
 FN=exit-interview-rooms; ROLE=exit-interview-lambda; TABLE=ExitInterviewRooms
 aws lambda delete-function-url-config --function-name "$FN" >/dev/null 2>&1
 aws lambda delete-function --function-name "$FN" >/dev/null 2>&1

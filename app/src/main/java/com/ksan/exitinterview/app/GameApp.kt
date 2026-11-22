@@ -16,6 +16,7 @@ import com.ksan.exitinterview.engine.Puzzle
 import com.ksan.exitinterview.engine.RoomClient
 import com.ksan.exitinterview.engine.RoomException
 import com.ksan.exitinterview.engine.Rules
+import com.ksan.exitinterview.engine.ServerAddress
 import com.ksan.exitinterview.engine.Session
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -100,12 +101,7 @@ class GameApp(private val ctx: Context) {
 
     fun hasServer(): Boolean = endpoint() != null
 
-    private fun endpoint(): Pair<String, String>? {
-        val t = server.trim()
-        val i = t.indexOf('#')
-        if (!t.startsWith("http") || i < 0) return null
-        return Pair(t.substring(0, i), t.substring(i + 1))
-    }
+    private fun endpoint(): Pair<String, String>? = ServerAddress.parse(server)
 
     private fun client(local: Boolean): RoomClient? {
         if (local) return RoomClient(LocalTransport(), "")
@@ -116,7 +112,7 @@ class GameApp(private val ctx: Context) {
     private fun netMessage(e: IOException): String = when ((e as? RoomException)?.reason) {
         "nf" -> "その合言葉の部屋はありません"
         "full" -> "その部屋は満員です"
-        "key" -> "サーバーの合言葉が違います"
+        "key" -> "サーバーの URL が違います（鍵が合いません）"
         else -> "通信できません"
     }
 
@@ -416,12 +412,12 @@ class GameApp(private val ctx: Context) {
         val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = cm.primaryClip
         val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).coerceToText(ctx).toString().trim() else ""
-        if (text.startsWith("http") && text.indexOf('#') > 0) {
+        if (ServerAddress.parse(text) != null) {
             server = text
             prefs.edit().putString("server", text).apply()
             notice = "サーバーを設定しました"
         } else {
-            notice = "クリップボードにサーバーの合言葉がありません"
+            notice = "クリップボードにサーバーの URL がありません"
         }
     }
 
