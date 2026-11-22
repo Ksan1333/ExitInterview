@@ -7,7 +7,8 @@ The scripts call the real aws command line, pointed at the mock. The one thing t
 answer on the function's public URL, so `curl` is replaced by a stand-in that unpacks the zip the script
 just uploaded and runs that code with the key the script stored: what answers is the deployed function.
 Checked: a first deploy and a redeploy from a clone (how KsanHub runs it), from a clone with uncommitted
-changes, pasted into a shell, with a key that may not touch IAM, and after remove.sh.
+changes, pasted into a shell, the way Windows behaves (no zip command, CR at line ends), with KsanHub's
+deploy key (which may not touch IAM), and after remove.sh.
 Skipped when moto (with its server) or the aws command line is missing.
 """
 import json
@@ -59,13 +60,23 @@ bin_dir = os.path.join(work, "bin")
 os.makedirs(bin_dir)
 capture = os.path.join(work, "uploaded.zip")
 
-# aws: keeps a copy of the zip on its way up, can refuse chosen commands, and talks to the mock.
+# aws: keeps a copy of the zip on its way up, can refuse chosen commands, can end its lines the way
+# the Windows build does (CR LF), and talks to the mock.
 with open(os.path.join(bin_dir, "aws"), "w") as fh:
     fh.write("""#!/usr/bin/env bash
 for a in "$@"; do [ "$a" = "fileb://fn.zip" ] && cp fn.zip "$EI_CAPTURE"; done
 if [ -n "${EI_REFUSE:-}" ] && [[ "$1 $2" == $EI_REFUSE ]]; then echo "An error occurred (AccessDenied) when calling $2" >&2; exit 254; fi
+if [ -n "${EI_CR:-}" ]; then "%s" --endpoint-url "%s" "$@" | sed 's/$/\r/'; exit "${PIPESTATUS[0]}"; fi
 exec "%s" --endpoint-url "%s" "$@"
-""" % (REAL_AWS, ENDPOINT))
+""" % (REAL_AWS, ENDPOINT, REAL_AWS, ENDPOINT))
+
+# zip and node: can be made to look missing.
+for tool, switch in (("zip", "EI_NOZIP"), ("node", "EI_NONODE")):
+    real = shutil.which(tool)
+    with open(os.path.join(bin_dir, tool), "w") as fh:
+        fh.write('#!/bin/sh\n[ -n "$%s" ] && exit 127\n%s\n' % (switch, 'exec "%s" "$@"' % real if real else "exit 127"))
+    os.chmod(os.path.join(bin_dir, tool), 0o755)
+HAVE_NODE = shutil.which("node") is not None
 
 # curl: the uploaded code answers, with the key that the deploy stored on the function.
 with open(os.path.join(bin_dir, "curl"), "w") as fh:
@@ -145,8 +156,25 @@ code, out = sh("bash", "-i", cwd=clone, env=ENV, stdin=script)
 check(address(out) == first and uploaded()[1].get("tree") == "", "pasted into a shell it deploys too, as an unknown version")
 check(not any(x.startswith("KSANHUB_SITE_URL=") for x in out.splitlines()), "and leaves out the line meant for KsanHub")
 
+if HAVE_NODE:
+    code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_NOZIP="1", EI_CR="1"))
+    check(code == 0 and address(out) == first and "\r" not in address(out), "the Windows way (no zip, CR at line ends) deploys to the same URL")
+    with zipfile.ZipFile(capture) as z:
+        sound = z.testzip() is None and all(i.external_attr >> 16 == 0o100644 and i.compress_type == zipfile.ZIP_DEFLATED
+                                            and i.date_time == (1980, 1, 1, 0, 0, 0) for i in z.infolist())
+        same = z.read("lambda_function.py") == open(os.path.join(HERE, "lambda_function.py"), "rb").read()
+    check(sound and same and uploaded()[0] == ["build.json", "lambda_function.py"] and uploaded()[1].get("tree") == tree,
+          "the zip that Node.js writes is sound, readable by the function, and carries the same code and version")
+else:
+    print("skip  the Windows way (no node here)")
+code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_NOZIP="1", EI_NONODE="1"))
+check(code == 0 and uploaded()[1].get("tree") == tree, "with neither zip nor Node.js, Python packs the code")
+
 code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="iam *-role-policy"))
-check(code == 0 and address(out) == first and "ロールの権限は書き直せませんでした" in out, "a key that may not change the existing role still replaces the code")
+check(code == 0 and address(out) == first and "ロールの権限を書き直せません" in out, "a key that may not change the existing role still replaces the code")
+code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="iam *"))
+check(code == 0 and address(out) == first and "IAM を扱えません" in out and "KSANHUB_SITE_URL=" + first in out.splitlines(),
+      "KsanHub's key (no IAM at all) replaces the code of a function that exists")
 code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="lambda update-function-code"))
 check(code != 0 and not any(x.startswith("KSANHUB_SITE_URL=") for x in out.splitlines()) and "できました" not in out, "a refused upload fails the deploy")
 
@@ -154,6 +182,9 @@ code, out = sh("bash", "server/remove.sh", cwd=clone, env=ENV)
 check("消しました" in out and sh("aws", "lambda", "get-function", "--function-name", "exit-interview-rooms", env=ENV)[0] != 0
       and sh("aws", "dynamodb", "describe-table", "--table-name", "ExitInterviewRooms", env=ENV)[0] != 0
       and sh("aws", "iam", "get-role", "--role-name", "exit-interview-lambda", env=ENV)[0] != 0, "remove.sh takes everything away")
+code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="iam *"))
+check(code != 0 and "初めての配置だけ" in out and "できました" not in out and not any(x.startswith("KSANHUB_SITE_URL=") for x in out.splitlines()),
+      "KsanHub's key cannot make the first deploy, and says what to do instead")
 code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="iam *-role-policy"))
 check(code != 0 and "できました" not in out, "a first deploy that cannot set up the role stops")
 sh("bash", "server/remove.sh", cwd=clone, env=ENV)

@@ -17,28 +17,36 @@ b64 = base64.b64encode(gzip.compress(code, 9, mtime=0)).decode("ascii")
 
 SCRIPT = r'''#!/usr/bin/env bash
 # Exit Interview のサーバーを AWS に置きます。使い方は2つあります。
-#   1. KsanHub の「AWS に配置」（リポジトリを取ってきて、このファイルを実行します）
-#   2. AWS の CloudShell に、このファイルの中身を全部貼り付けて Enter
+#   1. KsanHub の「AWS に配置」（リポジトリを取ってきて、このファイルを実行します。
+#      PC では Git for Windows の bash、スマホからは AWS の CodeBuild が動かします）
+#   2. AWS の CloudShell に、このファイルの中身を全部貼り付けて Enter（KsanHub の「CloudShell で配置」も CloudShell で動かします）
 # 作るもの: DynamoDB テーブル 1つ / IAM ロール 1つ / Lambda 関数 1つ（関数URLつき）。
 # 何度実行しても同じ結果になります（2回目からは関数の中身だけ入れ替えます）。
+# 初めての配置は 2 で行います。KsanHub の配置用の鍵は IAM ロールを作れないためです（2回目からは 1 でできます）。
 # このファイルは server/make_deploy.py が作ります。手で書き換えないでください。
 ei_deploy() (
   REGION="${EI_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-}}}"
   [ -n "$REGION" ] || REGION=$(aws configure get region 2>/dev/null)
   export AWS_REGION="${REGION:-ap-southeast-2}" AWS_PAGER=""
   export AWS_DEFAULT_REGION="$AWS_REGION"
+  # Windows（Git for Windows の bash）で動くときのため: 引数をパスと見なして書き換えさせない。AWS CLI が行末に付ける CR は取り除く。
+  export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*"
+  aws() { command aws "$@" | tr -d '\r'; return "${PIPESTATUS[0]}"; }
   FN=exit-interview-rooms; ROLE=exit-interview-lambda; TABLE=ExitInterviewRooms
-  NEWROLE=0; TREE=""; SELF="${BASH_SOURCE[0]:-}"
+  NEWROLE=0; HAVEFN=0; TREE=""; SELF="${BASH_SOURCE[0]:-}"
   say() { printf '\n== %s\n' "$*"; }
   ACC=$(aws sts get-caller-identity --query Account --output text) || { echo "AWS に入れていません。"; return 1; }
   echo "リージョン: $AWS_REGION"
 
   # リポジトリの中のファイルとして実行されていて、server フォルダがコミットのままなら、そのハッシュを控える。
   # KsanHub はこれを GitHub の最新と比べて「配置済み・最新」かどうかを出す。貼り付けて実行したときは空のまま。
-  if [ -f "$SELF" ] && TOP=$(git -C "$(dirname "$SELF")" rev-parse --show-toplevel 2>/dev/null) \
-     && [ "$SELF" -ef "$TOP/server/deploy.sh" ] && git -C "$TOP" diff --quiet HEAD -- server 2>/dev/null; then
-    TREE=$(git -C "$TOP" rev-parse HEAD:server 2>/dev/null)
+  if [ -f "$SELF" ] && [ "$(basename "$SELF")" = deploy.sh ]; then
+    DIR=$(dirname "$SELF")
+    if [ "$(git -C "$DIR" rev-parse --show-prefix 2>/dev/null | tr -d '\r')" = "server/" ] && git -C "$DIR" diff --quiet HEAD -- . 2>/dev/null; then
+      TREE=$(git -C "$DIR" rev-parse HEAD:server 2>/dev/null | tr -d '\r')
+    fi
   fi
+  aws lambda get-function --function-name "$FN" >/dev/null 2>&1 && HAVEFN=1
 
   say "1/6 DynamoDB テーブル"
   if ! aws dynamodb describe-table --table-name "$TABLE" >/dev/null 2>&1; then
@@ -60,30 +68,42 @@ ei_deploy() (
   fi
 
   say "2/6 実行ロール"
-  if ! aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
-    aws iam create-role --role-name "$ROLE" --assume-role-policy-document \
-      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null || return 1
-    NEWROLE=1
-  fi
-  # すでにあるロールを直す権限がない鍵（KsanHub の配置用など）でも、中身の入れ替えまでは進める。
-  { aws iam attach-role-policy --role-name "$ROLE" --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole \
+  # ロールが要るのは関数を作るときだけ。KsanHub の配置用の鍵は IAM を扱えないので、関数がすでにあれば今のロールのまま進む。
+  set_role() {
+    aws iam attach-role-policy --role-name "$ROLE" --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole \
     && aws iam put-role-policy --role-name "$ROLE" --policy-name rooms-table --policy-document \
-    "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":\"arn:aws:dynamodb:$AWS_REGION:$ACC:table/$TABLE\"}]}"; } \
-    || { [ "$NEWROLE" = 1 ] && return 1; echo "（ロールの権限は書き直せませんでした。今の設定のまま続けます）"; }
-  [ "$NEWROLE" = 1 ] && sleep 12
+    "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":\"arn:aws:dynamodb:$AWS_REGION:$ACC:table/$TABLE\"}]}"
+  }
+  if aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
+    set_role 2>/dev/null || { [ "$HAVEFN" = 1 ] || { set_role; return 1; }; echo "（この鍵ではロールの権限を書き直せません。今の設定のまま続けます）"; }
+  elif [ "$HAVEFN" = 1 ]; then
+    echo "（この鍵では IAM を扱えません。関数が今使っているロールのまま続けます）"
+  else
+    aws iam create-role --role-name "$ROLE" --assume-role-policy-document \
+      '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null || {
+      echo "IAM ロールを作れませんでした。KsanHub の配置用の鍵では、初めての配置はできません。"
+      echo "初めての配置だけ、KsanHub の「CloudShell で配置」か、CloudShell への貼り付けで行ってください。"
+      return 1
+    }
+    NEWROLE=1
+    set_role || return 1
+    sleep 12
+  fi
 
   say "3/6 関数のコード"
   W=$(mktemp -d) || return 1
   printf '%s' '@@CODE@@' | base64 -d | gunzip > "$W/lambda_function.py" || return 1
   printf '{"tree":"%s","deployedAt":"%s"}\n' "$TREE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.json"
   cd "$W" || return 1
+  # zip がない環境（Windows）では Node.js で、それもなければ Python でまとめる。
   zip -q fn.zip lambda_function.py build.json 2>/dev/null \
-    || python3 -c 'import zipfile; z = zipfile.ZipFile("fn.zip", "w", zipfile.ZIP_DEFLATED); z.write("lambda_function.py"); z.write("build.json"); z.close()' \
-    || { echo "zip も python3 も使えないため、コードをまとめられませんでした。"; return 1; }
+    || node -e '@@NODEZIP@@' 2>/dev/null \
+    || python3 -c 'import zipfile; z = zipfile.ZipFile("fn.zip", "w", zipfile.ZIP_DEFLATED); z.write("lambda_function.py"); z.write("build.json"); z.close()' 2>/dev/null \
+    || { echo "zip・Node.js・Python のどれも使えないため、コードをまとめられませんでした。"; return 1; }
   [ -n "$TREE" ] && echo "配置する版: ${TREE:0:12}" || echo "配置する版: 不明（貼り付けて実行したか、server フォルダに未コミットの変更があります）"
 
   say "4/6 Lambda 関数"
-  if aws lambda get-function --function-name "$FN" >/dev/null 2>&1; then
+  if [ "$HAVEFN" = 1 ]; then
     KEY=$(aws lambda get-function-configuration --function-name "$FN" --query 'Environment.Variables.EI_KEY' --output text) || return 1
     case "$KEY" in ""|None) echo "関数に鍵がありません。server/remove.sh で消してから、もう一度配置してください。"; return 1 ;; esac
     aws lambda update-function-code --function-name "$FN" --zip-file fileb://fn.zip >/dev/null || return 1
@@ -144,7 +164,27 @@ ei_deploy() (
 ei_deploy
 '''
 
-out = SCRIPT.replace("@@CODE@@", b64)
+# A zip writer for Node.js, for machines with no zip command (Windows). It holds no single quotes, so it sits inside '...'.
+NODEZIP = (
+    'const fs=require("fs"),zl=require("zlib"),t=[];'
+    'for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}'
+    'const crc=b=>{let c=0xFFFFFFFF;for(const x of b)c=t[(c^x)&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0};'
+    'const loc=[],cen=[];let off=0;'
+    'for(const name of["lambda_function.py","build.json"]){'
+    'const d=fs.readFileSync(name),c=zl.deflateRawSync(d),nm=Buffer.from(name),h=Buffer.alloc(30),e=Buffer.alloc(46);'
+    'h.writeUInt32LE(0x04034b50,0);h.writeUInt16LE(20,4);h.writeUInt16LE(8,8);h.writeUInt16LE(0x21,12);'
+    'h.writeUInt32LE(crc(d),14);h.writeUInt32LE(c.length,18);h.writeUInt32LE(d.length,22);h.writeUInt16LE(nm.length,26);'
+    'e.writeUInt32LE(0x02014b50,0);e.writeUInt16LE(0x0314,4);e.writeUInt16LE(20,6);e.writeUInt16LE(8,10);e.writeUInt16LE(0x21,14);'
+    'e.writeUInt32LE(crc(d),16);e.writeUInt32LE(c.length,20);e.writeUInt32LE(d.length,24);e.writeUInt16LE(nm.length,28);'
+    'e.writeUInt32LE(0x81A40000,38);e.writeUInt32LE(off,42);'
+    'loc.push(h,nm,c);cen.push(e,nm);off+=30+nm.length+c.length}'
+    'const cd=Buffer.concat(cen),end=Buffer.alloc(22);'
+    'end.writeUInt32LE(0x06054b50,0);end.writeUInt16LE(2,8);end.writeUInt16LE(2,10);end.writeUInt32LE(cd.length,12);end.writeUInt32LE(off,16);'
+    'fs.writeFileSync("fn.zip",Buffer.concat([...loc,cd,end]))'
+)
+assert "'" not in NODEZIP
+
+out = SCRIPT.replace("@@CODE@@", b64).replace("@@NODEZIP@@", NODEZIP)
 path = os.path.join(HERE, "deploy.sh")
 if "--check" in sys.argv:
     ok = os.path.exists(path) and open(path, encoding="utf-8").read() == out
