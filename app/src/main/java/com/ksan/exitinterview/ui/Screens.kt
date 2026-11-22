@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,7 +96,10 @@ private fun TitleScreen(game: GameApp) {
             PlainButton("テスト部屋", 15.sp, enabled = !game.busy) { game.screen = Screen.TEST_MENU }
             PlainButton("設定", 15.sp) { game.screen = Screen.SETTINGS }
         }
-        if (!game.hasServer()) Label("サーバーがまだ設定されていません（「設定」から）", 13.sp, color = Ui.Red)
+        if (!game.hasServer()) {
+            val msg = if (game.usesPassphrase()) "サーバーの合言葉がまだです（「設定」から）" else "サーバーがまだ設定されていません（「設定」から）"
+            Label(msg, 13.sp, color = Ui.Red)
+        }
     }
 }
 
@@ -145,14 +151,47 @@ private fun LobbyScreen(game: GameApp) {
 
 @Composable
 private fun SettingsScreen(game: GameApp) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var pass by remember { mutableStateOf("") }
+    val pasted = ServerAddress.parse(game.server) != null
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Label("設定", 26.sp, color = Ui.Accent)
+        if (game.usesPassphrase()) {
+            // 合言葉の欄は上に置く（キーボードが出ても隠れにくい）
+            Label(
+                if (game.passKey.isNotEmpty()) "サーバーの合言葉：設定済み（2人で同じ言葉）" else "サーバーの合言葉：未設定（2人で同じ言葉を入れる）",
+                14.sp,
+                color = if (game.passKey.isNotEmpty() || pasted) Ui.Dim else Ui.Red,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.width(230.dp).background(Ui.Dark, Ui.Corner).border(2.dp, Ui.Line, Ui.Corner)
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                ) {
+                    if (pass.isEmpty()) Label("合言葉", 15.sp, color = Ui.Dim)
+                    BasicTextField(
+                        value = pass,
+                        onValueChange = { pass = it.replace("\n", "") },
+                        modifier = Modifier.width(206.dp),
+                        textStyle = TextStyle(color = Ui.Text, fontSize = 15.sp, fontFamily = Ui.Hand),
+                        singleLine = true,
+                        cursorBrush = SolidColor(Ui.Accent),
+                    )
+                }
+                PlainButton("決める", 15.sp, enabled = pass.isNotBlank(), strong = true) { if (game.setPassphrase(pass)) pass = "" }
+                PlainButton("消す", 15.sp, enabled = game.passKey.isNotEmpty()) { game.clearPassphrase() }
+            }
+        }
         PlainButton(if (game.soundOn) "音：オン" else "音：オフ", 17.sp) { game.toggleSound() }
         val host = ServerAddress.host(game.server).take(34)
-        Label(if (game.hasServer()) "サーバー：$host" else "サーバー：未設定", 14.sp, color = Ui.Dim)
+        val urlLabel = when {
+            pasted -> "サーバー：$host（貼り付けた URL を使う）"
+            game.usesPassphrase() -> "サーバーの URL を貼り付けて使うこともできます"
+            else -> "サーバー：未設定"
+        }
+        Label(urlLabel, 14.sp, color = Ui.Dim)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlainButton("クリップボードから貼り付け", 15.sp) { game.pasteServer() }
-            PlainButton("元に戻す", 15.sp) { game.clearServer() }
+            PlainButton("元に戻す", 15.sp, enabled = pasted) { game.clearServer() }
         }
         PlainButton("戻る", 15.sp) { game.screen = Screen.TITLE }
     }

@@ -20,6 +20,17 @@ fun main() {
     check(p("$host/k/abc/build.json") == null && p("$host/x/k/abc") == null && p("$host/k/a b") == null, "other paths are refused")
     check(p("") == null && p("abc") == null && p("ftp://x/k/abc") == null && p("https:///k/abc") == null && p("https://#k") == null, "text that is not a server is refused")
     check(ServerAddress.host("$host/k/0123abcdef") == "abc123.lambda-url.ap-southeast-2.on.aws" && ServerAddress.host("nonsense") == "", "the host is shown without the key")
+    val b = ServerAddress::base
+    check(b("$host/") == "$host/" && b(host) == "$host/" && b("  $host\n") == "$host/", "the built-in address is read with or without a closing slash")
+    check(b("http://192.168.0.5:8080") == "http://192.168.0.5:8080/", "a built-in address keeps its port")
+    check(b("") == null && b("abc") == null && b("https://") == null && b("$host/#k") == null && b("$host/?k=1") == null, "an empty or odd built-in address is refused")
+    // The same values as server/set-passphrase.sh (Python) and Node give; keep the two in step.
+    val k = ServerAddress::keyOf
+    check(k("テスト合言葉") == "3eb24f415a2976bbe1b55c234b0ec583", "the passphrase gives the same key as server/set-passphrase.sh")
+    check(k("  ﾃｽﾄ合言葉　") == k("テスト合言葉"), "half-width kana and spaces around the passphrase do not matter")
+    check(k("ＡＢＣ１２３") == "ac9409d69213deef95620c4d09ee139d" && k("ABC123") == k("ＡＢＣ１２３"), "full-width and half-width letters give the same key")
+    check(k("") == null && k("   ") == null, "an empty passphrase gives no key")
+    check(k("abc") != k("ABC"), "upper and lower case letters are different")
     println(if (fails == 0) "ALL OK" else "$fails FAILED")
     exitProcess(if (fails == 0) 0 else 1)
 }

@@ -78,6 +78,13 @@ class GameApp(private val ctx: Context) {
     var server by mutableStateOf("")
     var savedCode by mutableStateOf(prefs.getString("code", "") ?: "")
 
+    /** The server address built into the APK (server_base.txt, made at build time; no key). Empty when there is none. */
+    val builtInBase: String = readAsset("server_base.txt")
+
+    /** The key made from the server passphrase (the passphrase itself is not kept). */
+    var passKey by mutableStateOf(prefs.getString("pass_key", "") ?: "")
+        private set
+
     init {
         sfx.enabled = soundOn
         server = prefs.getString("server", null) ?: readAsset("server.txt")
@@ -101,7 +108,16 @@ class GameApp(private val ctx: Context) {
 
     fun hasServer(): Boolean = endpoint() != null
 
-    private fun endpoint(): Pair<String, String>? = ServerAddress.parse(server)
+    /** True when the APK has a server address built in, so the players only need the passphrase. */
+    fun usesPassphrase(): Boolean = ServerAddress.base(builtInBase) != null
+
+    /** A pasted URL (with its key) wins; otherwise the built-in address with the passphrase's key. */
+    private fun endpoint(): Pair<String, String>? {
+        ServerAddress.parse(server)?.let { return it }
+        val base = ServerAddress.base(builtInBase) ?: return null
+        if (passKey.isEmpty()) return null
+        return Pair(base, passKey)
+    }
 
     private fun client(local: Boolean): RoomClient? {
         if (local) return RoomClient(LocalTransport(), "")
@@ -112,7 +128,7 @@ class GameApp(private val ctx: Context) {
     private fun netMessage(e: IOException): String = when ((e as? RoomException)?.reason) {
         "nf" -> "その合言葉の部屋はありません"
         "full" -> "その部屋は満員です"
-        "key" -> "サーバーの URL が違います（鍵が合いません）"
+        "key" -> if (ServerAddress.parse(server) == null && usesPassphrase()) "サーバーの合言葉が違います（「設定」で入れ直してください）" else "サーバーの URL が違います（鍵が合いません）"
         else -> "通信できません"
     }
 
@@ -424,6 +440,24 @@ class GameApp(private val ctx: Context) {
     fun clearServer() {
         prefs.edit().remove("server").apply()
         server = readAsset("server.txt")
+    }
+
+    /** Keeps the key made from the passphrase. Both players type the same passphrase once. */
+    fun setPassphrase(text: String): Boolean {
+        val k = ServerAddress.keyOf(text)
+        if (k == null) {
+            notice = "合言葉を入れてください"
+            return false
+        }
+        passKey = k
+        prefs.edit().putString("pass_key", k).apply()
+        notice = "サーバーの合言葉を設定しました"
+        return true
+    }
+
+    fun clearPassphrase() {
+        passKey = ""
+        prefs.edit().remove("pass_key").apply()
     }
 
     // ---------------------------------------------------------------- lifecycle

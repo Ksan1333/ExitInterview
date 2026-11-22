@@ -57,13 +57,19 @@ KsanHub の「Exit Interview」は、このリポジトリの最新の Release �
    keyPassword=<同じパスワード>
    ```
 
-3. APK を作る。`dist\ExitInterview-<版>.apk` ができる。
+3. リポジトリの直下に `server-base.txt` を置く（`.gitignore` 済み）。中身はサーバーのアドレスの 1 行だけで、鍵（`/k/` の後ろ）は書かない（書いてあるとビルドが止まる）。APK に入り、遊ぶ人は「サーバーの合言葉」を入れるだけでよくなる。
+
+   ```
+   https://<関数URLのホスト>.lambda-url.ap-southeast-2.on.aws/
+   ```
+
+4. APK を作る。`dist\ExitInterview-<版>.apk` ができる（`server-base.txt` がないと止まる）。
 
    ```powershell
    .\gradlew.bat distApk
    ```
 
-4. 持ち主が Release を作る（タグは `v<版>`。添付は APK だけ）。
+5. 持ち主が Release を作る（タグは `v<版>`。添付は APK だけ）。
 
    ```powershell
    gh release create v0.1.0 dist\ExitInterview-0.1.0.apk --repo Ksan1333/ExitInterview --target main --title "Exit Interview 0.1.0" --notes-file docs\RELEASE_NOTES.md
@@ -94,7 +100,7 @@ python3 tools/make_icon.py --ksanhub <scoop-bucket の icons フォルダ>
 ### 手順
 
 1. 初回だけ：KsanHub の「Exit Interview（部屋サーバー）」で「CloudShell で配置」を押し、コピーされたコマンドを CloudShell に貼り付ける。
-2. 最後に出る `https://…on.aws/k/…` の1行が、サーバーの URL。これをゲームの「設定」→「クリップボードから貼り付け」で入れる。友人にも同じ URL を送って、同じ操作をしてもらう。
+2. 最後に出る `https://…on.aws/k/…` の1行が、サーバーの URL。そのアドレスの部分（`/k/` の前まで）を `server-base.txt` に書いて APK を作り、下の「サーバーの合言葉」を設定する。
 3. 2回目から（`server` フォルダを直したあと）：KsanHub の「AWS に配置」を押す。URL は変わらないので、ゲーム側は何もしなくてよい。
 
 - KsanHub の「AWS に配置」で置くと、サーバーの URL が KsanHub に登録されます（スクリプトが最後に出す `KSANHUB_SITE_URL=<URL>` の行）。カードの「URL」で見られます。初回を CloudShell で行ったときは、次の「AWS に配置」で登録されます。
@@ -104,10 +110,22 @@ python3 tools/make_icon.py --ksanhub <scoop-bucket の icons フォルダ>
 
 KsanHub の一覧（`Ksan1333/scoop-bucket` の `catalog.json`）では、サーバーが `exitinterview-server`（配置スクリプトは `server/deploy.sh`、判定に使うフォルダは `server`）、ゲーム本体が `exitinterview`（この Release の APK を入れる）です。
 
-### サーバーの URL をゲームに入れる
+### サーバーの合言葉（0.1.2 から）
 
-- アプリで入れる（おすすめ）：URL をコピー → アプリの「設定」→「クリップボードから貼り付け」。友人も同じ操作をする。
-- APK に入れる：`app/src/main/assets/server.txt` にその1行を書いてビルドする。友人は何もしなくてよい。ただしこのリポジトリは公開なので、書いた `server.txt` はコミットしないでください。
+配布用の APK にはサーバーのアドレス（鍵なし）が入っています。遊ぶ人は、2人で決めた「サーバーの合言葉」を一度だけ入れます。
+
+1. 初回だけ（合言葉を変えるときも）：[`server/set-passphrase.sh`](server/set-passphrase.sh) の中身を CloudShell に貼り付け、合言葉を 2 回入れる。サーバーの鍵が合言葉から作った値に替わる（URL と部屋のデータは変わらない。前の `/k/` の URL は使えなくなる）。
+2. 2人とも、ゲームの「設定」→「サーバーの合言葉」に同じ言葉を入れて「決める」。合言葉そのものはスマホに残さず、作った鍵だけを覚える。
+
+- 全角と半角、前後の空白は区別しません。大文字と小文字は区別します。
+- 鍵の作り方は、アプリ（`ServerAddress.keyOf`）と `server/set-passphrase.sh` で同じにしてあります。片方だけ直さないでください（`tools/enginecheck` が同じ値になることを確かめます）。
+- 合言葉が短いと、総当たりで当てられることがあります（当てられても部屋を作れるだけで、謎の中身はサーバーにありません）。
+- 「AWS に配置」は今の鍵を引き継ぐので、合言葉は変わりません。
+
+### サーバーの URL をゲームに入れる（予備）
+
+- アプリで入れる：URL をコピー → アプリの「設定」→「クリップボードから貼り付け」。貼り付けた URL は合言葉より優先します（「元に戻す」で合言葉に戻る）。
+- APK に入れる：`app/src/main/assets/server.txt` にその1行を書いてビルドする。ただしこのリポジトリは公開なので、書いた `server.txt` はコミットしないでください。
 
 消すときは [`server/remove.sh`](server/remove.sh) を CloudShell に貼り付けます。
 
@@ -130,6 +148,7 @@ python3 server/local_server.py 8080
 
 - 見えるものと持ち物は2人で共通です。
 - 左上の目のボタンで、相手が見ている場所へ移動します。
+- 初めてのときは「設定」で、2人で決めたサーバーの合言葉を入れます。
 - メニューからヒント（3段階 → 答え → スキップ）を開けます。開くと2人の画面に出ます。
 
 ## 検証

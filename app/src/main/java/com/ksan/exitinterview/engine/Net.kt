@@ -50,6 +50,31 @@ object ServerAddress {
 
     /** The host, for showing which server is set without showing the key. */
     fun host(text: String): String = (parse(text)?.first ?: "").substringAfter("//").substringBefore("/")
+
+    /**
+     * The address built into the APK at build time (no key in it), as the address to post to.
+     * Null when it is empty or not an http(s) address.
+     */
+    fun base(text: String): String? {
+        val t = text.trim()
+        if (!t.startsWith("http://") && !t.startsWith("https://")) return null
+        if (t.any { it.isWhitespace() } || t.contains('#') || t.contains('?')) return null
+        val host = t.substringAfter("//").substringBefore("/")
+        if (host.isEmpty()) return null
+        return t.substringBefore("//") + "//" + host + "/"
+    }
+
+    /**
+     * The server key made from the passphrase the two players agreed on.
+     * Full-width and half-width letters count as the same (NFKC), and spaces around it are ignored.
+     * server/set-passphrase.sh makes the same key, so keep the two in step.
+     */
+    fun keyOf(passphrase: String): String? {
+        val t = java.text.Normalizer.normalize(passphrase, java.text.Normalizer.Form.NFKC).trim()
+        if (t.isEmpty()) return null
+        val d = java.security.MessageDigest.getInstance("SHA-256").digest(("exit-interview:" + t).toByteArray(Charsets.UTF_8))
+        return d.joinToString("") { "%02x".format(it) }.take(32)
+    }
 }
 
 /** The same protocol as the real server, kept in memory. Used for offline solo tests. */

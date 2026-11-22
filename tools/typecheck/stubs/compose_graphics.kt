@@ -9,6 +9,10 @@ class Color(val value: Long) {
     }
 }
 
+abstract class Brush
+
+class SolidColor(val value: Color) : Brush()
+
 interface ImageBitmap {
     val width: Int
     val height: Int
