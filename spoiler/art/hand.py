@@ -9,6 +9,7 @@ from PIL import Image
 W, H = 960, 540
 SCALE = 2
 FONT = "Yomogi"
+TEXT_LOG = []  # every string drawn, so the build can check that the font has all the letters
 
 INK = "#101316"
 BG = "#2e4a49"
@@ -198,6 +199,7 @@ class Scene:
         if op < 1:
             a += ' opacity="%.2f"' % op
         self.out.append("<text %s>%s</text>" % (a, esc(t)))
+        TEXT_LOG.append(t)
 
     def paper(self, x, y, w, h, lines, size=18, color=PAPER, rot=0.0, gap=1.35, align="left", pin=True, pad=12, ink=INK):
         """A sheet of paper with handwritten lines."""

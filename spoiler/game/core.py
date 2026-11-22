@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import struct
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -258,8 +259,30 @@ def _sheet(v, base_im, layers, preview_dir):
     out.save(os.path.join(preview_dir, "_sheetbig_" + v.id + ".png"))
 
 
+def check_font():
+    """Every letter that is drawn or shown must exist in the handwriting font."""
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        print("note: fontTools is missing, letters were not checked against the font")
+        return
+    path = subprocess.run(["fc-match", "-f", "%{file}", hand.FONT], capture_output=True, text=True).stdout
+    if hand.FONT.lower() not in os.path.basename(path).lower():
+        raise ValueError("font %s is not installed (fc-match gave %s)" % (hand.FONT, path))
+    cmap = TTFont(path).getBestCmap()
+    texts = list(hand.TEXT_LOG) + [v.name for v in VIEWS.values()]
+    for p in PUZZLES:
+        texts += [p["name"], p["ans"]] + p["hints"]
+    for st in STAGES.values():
+        texts += st.get("cap", []) + st.get("credits", []) + st.get("letter", [])
+    missing = sorted({c for t in texts for c in t if ord(c) > 32 and c != "\u3000" and ord(c) not in cmap})
+    if missing:
+        raise ValueError("letters missing from the font: %s" % "".join(missing))
+
+
 def build(pack_path, preview_dir=None, quiet=False):
     check()
+    check_font()
     imgs = {}
     views = {}
     for v in VIEWS.values():
