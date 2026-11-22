@@ -5,8 +5,11 @@ package android.view
 class Window {
     var attributes: WindowManager.LayoutParams = WindowManager.LayoutParams()
     val insetsController: WindowInsetsController? = null
+    val decorView: View = View()
     fun addFlags(flags: Int) {}
 }
+
+open class View
 
 interface WindowManager {
     class LayoutParams {

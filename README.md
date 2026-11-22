@@ -19,7 +19,7 @@
 
 | 部分 | 技術 |
 | --- | --- |
-| アプリ | Kotlin 2.0.21、Jetpack Compose、minSdk 33（Android 13）、横画面 |
+| アプリ | Kotlin 2.0.21、Jetpack Compose、minSdk 26（Android 8.0）、横画面 |
 | サーバー | AWS Lambda（関数URL）＋ DynamoDB、ap-southeast-2 |
 | 同期 | 1秒ごとの問い合わせ。操作は手元ですぐ反映し、あとからサーバーへ送る |
 

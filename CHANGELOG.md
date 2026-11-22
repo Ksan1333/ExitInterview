@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.1] - 2026-11-22
+
+### Fixed
+
+- Android 12 以前のスマホに入れられなかった（KsanHub から取った APK を読めなかった）。minSdk を 33（Android 13）から 26（Android 8.0）に下げた。
+
+### Changed
+
+- 全画面表示（ステータスバーとナビゲーションバーを隠す）を androidx の `WindowCompat` で行い、Android 8〜10 でも隠れるようにした。ノッチ側まで描く設定は Android 9 以上だけで行う。
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

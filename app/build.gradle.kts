@@ -16,7 +16,7 @@ val signing = Properties().apply {
 val hasReleaseSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !signing.getProperty(it).isNullOrBlank() }
 
 // 版。GitHub の Release のタグ（v0.1.0）と同じにする。KsanHub はこれを比べて更新があるかを決める。上げるときは versionCode も 1 増やす
-val appVersion = "0.1.0"
+val appVersion = "0.1.1"
 
 android {
     namespace = "com.ksan.exitinterview"
@@ -25,9 +25,9 @@ android {
     defaultConfig {
         // ほかの自作アプリと同じ com.ksan1333.* にそろえる（KsanHub の一覧の package と同じ値）。コードの置き場所（namespace）は別
         applicationId = "com.ksan1333.exitinterview"
-        minSdk = 33
+        minSdk = 26
         targetSdk = 35
-        versionCode = 1
+        versionCode = 2
         versionName = appVersion
     }
 
@@ -65,6 +65,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.activity:activity-compose:1.9.3")
+    // 全画面表示を Android 8〜10 でも行う（WindowCompat）
+    implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
 
