@@ -65,16 +65,19 @@ object ServerAddress {
     }
 
     /**
-     * The server key made from the passphrase the two players agreed on.
-     * Full-width and half-width letters count as the same (NFKC), and spaces around it are ignored.
-     * server/set-passphrase.sh makes the same key, so keep the two in step.
+     * The room code for a passphrase the two players agreed on ("m" and 24 hex characters, for the server's meet).
+     * The passphrase itself never leaves the phone. Full-width and half-width letters count as the same (NFKC),
+     * spaces around it are ignored, and the mode is part of it so a test room never meets a real one.
      */
-    fun keyOf(passphrase: String): String? {
+    fun roomCodeOf(mode: String, passphrase: String): String? {
         val t = java.text.Normalizer.normalize(passphrase, java.text.Normalizer.Form.NFKC).trim()
         if (t.isEmpty()) return null
-        val d = java.security.MessageDigest.getInstance("SHA-256").digest(("exit-interview:" + t).toByteArray(Charsets.UTF_8))
-        return d.joinToString("") { "%02x".format(it) }.take(32)
+        val d = java.security.MessageDigest.getInstance("SHA-256").digest("exit-interview-room:$mode:$t".toByteArray(Charsets.UTF_8))
+        return "m" + d.joinToString("") { "%02x".format(it) }.take(24)
     }
+
+    /** True for a room met by passphrase (its code is a hash, not something to show). */
+    fun isPassphraseRoom(code: String): Boolean = code.startsWith("m")
 }
 
 /** The same protocol as the real server, kept in memory. Used for offline solo tests. */
@@ -168,11 +171,13 @@ class Snapshot(
     val now: Int,
 )
 
-class Joined(val code: String, val slot: Int, val snap: Snapshot)
+/** [made]: the room was made by this request (meet), so the partner has not come yet. */
+class Joined(val code: String, val slot: Int, val snap: Snapshot, val made: Boolean = false)
 
 class RoomClient(private val transport: Transport, private val key: String) {
     private fun call(req: Map<String, Any?>): Map<String, Any?> {
-        val text = transport.post(Json.str(req + ("k" to key)))
+        // No key: the server takes requests without one (meeting by passphrase). An empty key is not sent.
+        val text = transport.post(Json.str(if (key.isEmpty()) req else req + ("k" to key)))
         try {
             return Json.parse(text).asMap()
         } catch (e: IllegalArgumentException) {
@@ -192,8 +197,12 @@ class RoomClient(private val transport: Transport, private val key: String) {
 
     private fun joined(r: Map<String, Any?>): Joined {
         if (r["ok"] != true) throw RoomException(r["err"].asStr() ?: "err")
-        return Joined(r["code"].asStr() ?: "", r["slot"].asInt(), snap(r))
+        return Joined(r["code"].asStr() ?: "", r["slot"].asInt(), snap(r), r["made"] == true)
     }
+
+    /** Meets the partner by passphrase: takes a seat in the room [code] (from [ServerAddress.roomCodeOf]), or makes it. */
+    fun meet(code: String, pid: String, mode: String, init: GameState): Joined =
+        joined(call(mapOf("op" to "meet", "code" to code, "pid" to pid, "mode" to mode, "st" to init.toJson())))
 
     fun create(pid: String, mode: String, init: GameState): Joined =
         joined(call(mapOf("op" to "create", "pid" to pid, "mode" to mode, "st" to init.toJson())))

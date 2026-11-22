@@ -40,7 +40,7 @@ fun AppRoot(game: GameApp) {
             Screen.LOADING -> Label("読み込み中…", 20.sp)
             Screen.TITLE -> TitleScreen(game)
             Screen.TEST_MENU -> TestMenu(game)
-            Screen.JOIN -> JoinScreen(game)
+            Screen.MEET -> MeetScreen(game)
             Screen.SETTINGS -> SettingsScreen(game)
             Screen.LOBBY -> LobbyScreen(game)
             Screen.GAME -> GameScreen(game)
@@ -74,6 +74,7 @@ private fun onBack(game: GameApp) {
         }
         Screen.LOBBY -> game.leaveToTitle(true)
         Screen.ENDING -> Unit
+        Screen.MEET -> game.screen = if (game.meetMode == "test") Screen.TEST_MENU else Screen.TITLE
         else -> game.screen = Screen.TITLE
     }
 }
@@ -84,22 +85,20 @@ private fun TitleScreen(game: GameApp) {
         Label("Exit Interview", 46.sp, color = Ui.Accent)
         Label("出られたら合格", 15.sp, color = Ui.Dim)
         Spacer(Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlainButton("部屋を作る", 18.sp, enabled = !game.busy, strong = true) { game.createRoom("main", false, false) }
-            PlainButton("部屋に入る", 18.sp, enabled = !game.busy) { game.screen = Screen.JOIN }
+        PlainButton("遊ぶ", 20.sp, Modifier.width(180.dp), enabled = !game.busy, strong = true) {
+            game.meetMode = "main"
+            game.screen = Screen.MEET
         }
         val saved = game.savedCode
         if (saved.isNotEmpty()) {
-            PlainButton("続きから（$saved）", 16.sp, enabled = !game.busy) { game.joinRoom(saved) }
+            val label = if (ServerAddress.isPassphraseRoom(saved)) "続きから" else "続きから（$saved）"
+            PlainButton(label, 16.sp, enabled = !game.busy) { game.joinRoom(saved) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlainButton("テスト部屋", 15.sp, enabled = !game.busy) { game.screen = Screen.TEST_MENU }
             PlainButton("設定", 15.sp) { game.screen = Screen.SETTINGS }
         }
-        if (!game.hasServer()) {
-            val msg = if (game.usesPassphrase()) "サーバーの合言葉がまだです（「設定」から）" else "サーバーがまだ設定されていません（「設定」から）"
-            Label(msg, 13.sp, color = Ui.Red)
-        }
+        if (!game.hasServer()) Label("サーバーがまだ設定されていません（「設定」から）", 13.sp, color = Ui.Red)
     }
 }
 
@@ -109,28 +108,40 @@ private fun TestMenu(game: GameApp) {
         Label("テスト部屋", 26.sp, color = Ui.Accent)
         PlainButton("1人で（通信なし）", 17.sp, enabled = !game.busy) { game.createRoom("test", true, true) }
         PlainButton("1人で（サーバーを使う）", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom("test", true, false) }
-        PlainButton("2人で", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom("test", false, false) }
+        PlainButton("2人で（合言葉でつなぐ）", 17.sp, enabled = !game.busy && game.hasServer()) {
+            game.meetMode = "test"
+            game.screen = Screen.MEET
+        }
         PlainButton("戻る", 15.sp) { game.screen = Screen.TITLE }
     }
 }
 
 @Composable
-private fun JoinScreen(game: GameApp) {
-    var code by remember { mutableStateOf("") }
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Label("合言葉", 16.sp, color = Ui.Dim)
-        Label(code.padEnd(4, '・'), 44.sp, color = Ui.Accent)
-        for (row in listOf("12345", "67890")) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (d in row) {
-                    PlainButton(d.toString(), 22.sp, Modifier.width(58.dp)) { if (code.length < 4) code += d }
-                }
-            }
+private fun MeetScreen(game: GameApp) {
+    var pass by remember { mutableStateOf("") }
+    val test = game.meetMode == "test"
+    // 欄は上のほうに置く（キーボードが出ても隠れにくい）
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Label(if (test) "テスト部屋（2人で）" else "合言葉", 26.sp, color = Ui.Accent)
+        Label("2人で同じ合言葉を入れると、同じ部屋につながります", 15.sp, color = Ui.Dim)
+        Box(
+            Modifier.width(320.dp).background(Ui.Dark, Ui.Corner).border(2.dp, Ui.Accent, Ui.Corner)
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+        ) {
+            if (pass.isEmpty()) Label("合言葉を入れる", 18.sp, color = Ui.Dim)
+            BasicTextField(
+                value = pass,
+                onValueChange = { pass = it.replace("\n", "") },
+                modifier = Modifier.width(292.dp),
+                textStyle = TextStyle(color = Ui.Text, fontSize = 18.sp, fontFamily = Ui.Hand),
+                singleLine = true,
+                cursorBrush = SolidColor(Ui.Accent),
+            )
         }
+        Label("前と同じ合言葉なら、続きから遊べます", 13.sp, color = Ui.Dim)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlainButton("戻る", 16.sp) { game.screen = Screen.TITLE }
-            PlainButton("消す", 16.sp) { code = code.dropLast(1) }
-            PlainButton("入る", 16.sp, enabled = code.length == 4 && !game.busy, strong = true) { game.joinRoom(code) }
+            PlainButton("戻る", 16.sp) { game.screen = if (test) Screen.TEST_MENU else Screen.TITLE }
+            PlainButton("つなぐ", 18.sp, enabled = pass.isNotBlank() && !game.busy, strong = true) { game.meetRoom(pass) }
         }
     }
 }
@@ -138,9 +149,14 @@ private fun JoinScreen(game: GameApp) {
 @Composable
 private fun LobbyScreen(game: GameApp) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Label("合言葉", 16.sp, color = Ui.Dim)
-        Label(game.roomCode, 64.sp, color = Ui.Accent)
-        Label(if (game.partnerJoined) "相棒が来ました" else "相棒を待っています…", 18.sp)
+        if (ServerAddress.isPassphraseRoom(game.roomCode)) {
+            Label("合言葉の部屋", 26.sp, color = Ui.Accent)
+            Label(if (game.partnerJoined) "相棒が来ました" else "相棒が同じ合言葉を入れるのを待っています…", 18.sp)
+        } else {
+            Label("合言葉", 16.sp, color = Ui.Dim)
+            Label(game.roomCode, 64.sp, color = Ui.Accent)
+            Label(if (game.partnerJoined) "相棒が来ました" else "相棒を待っています…", 18.sp)
+        }
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlainButton("やめる", 16.sp) { game.leaveToTitle(true) }
@@ -151,41 +167,14 @@ private fun LobbyScreen(game: GameApp) {
 
 @Composable
 private fun SettingsScreen(game: GameApp) {
-    var pass by remember { mutableStateOf("") }
     val pasted = ServerAddress.parse(game.server) != null
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Label("設定", 26.sp, color = Ui.Accent)
-        if (game.usesPassphrase()) {
-            // 合言葉の欄は上に置く（キーボードが出ても隠れにくい）
-            Label(
-                if (game.passKey.isNotEmpty()) "サーバーの合言葉：設定済み（2人で同じ言葉）" else "サーバーの合言葉：未設定（2人で同じ言葉を入れる）",
-                14.sp,
-                color = if (game.passKey.isNotEmpty() || pasted) Ui.Dim else Ui.Red,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.width(230.dp).background(Ui.Dark, Ui.Corner).border(2.dp, Ui.Line, Ui.Corner)
-                        .padding(horizontal = 12.dp, vertical = 9.dp),
-                ) {
-                    if (pass.isEmpty()) Label("合言葉", 15.sp, color = Ui.Dim)
-                    BasicTextField(
-                        value = pass,
-                        onValueChange = { pass = it.replace("\n", "") },
-                        modifier = Modifier.width(206.dp),
-                        textStyle = TextStyle(color = Ui.Text, fontSize = 15.sp, fontFamily = Ui.Hand),
-                        singleLine = true,
-                        cursorBrush = SolidColor(Ui.Accent),
-                    )
-                }
-                PlainButton("決める", 15.sp, enabled = pass.isNotBlank(), strong = true) { if (game.setPassphrase(pass)) pass = "" }
-                PlainButton("消す", 15.sp, enabled = game.passKey.isNotEmpty()) { game.clearPassphrase() }
-            }
-        }
         PlainButton(if (game.soundOn) "音：オン" else "音：オフ", 17.sp) { game.toggleSound() }
         val host = ServerAddress.host(game.server).take(34)
         val urlLabel = when {
             pasted -> "サーバー：$host（貼り付けた URL を使う）"
-            game.usesPassphrase() -> "サーバーの URL を貼り付けて使うこともできます"
+            game.hasServer() -> "サーバー：アプリに入っているものを使う（設定は要りません）"
             else -> "サーバー：未設定"
         }
         Label(urlLabel, 14.sp, color = Ui.Dim)

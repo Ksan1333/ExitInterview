@@ -237,7 +237,7 @@ private fun Sheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
 private fun MenuOverlay(game: GameApp) {
     Sheet(onDismiss = { game.overlay = Overlay.NONE }) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Label("合言葉 " + game.roomCode, 15.sp, color = Ui.Dim)
+            if (!com.ksan.exitinterview.engine.ServerAddress.isPassphraseRoom(game.roomCode)) Label("合言葉 " + game.roomCode, 15.sp, color = Ui.Dim)
             PlainButton("ヒント", 18.sp, strong = true) {
                 game.hintFocus = null
                 game.overlay = Overlay.HINT

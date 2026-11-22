@@ -24,7 +24,8 @@ def check(ok, what):
 
 def scenario(store, label):
     h = lambda q, now=1000: room.handle(q, store, now=now, key="K")  # noqa: E731
-    check(h({"op": "create", "pid": "a"})["err"] == "key", label + ": a request without the key is refused")
+    check(h({"op": "create", "k": "X", "pid": "a"})["err"] == "key", label + ": a request with a wrong key is refused")
+    check(h({"op": "create", "pid": "a"})["ok"], label + ": a request without a key is accepted (the app meets by passphrase)")
     c = h({"op": "create", "k": "K", "pid": "a", "mode": "test", "st": "S0"})
     code = c["code"]
     check(c["ok"] and c["slot"] == 0 and c["ver"] == 1 and c["st"] == "S0" and c["mode"] == "test" and not c["p1"] and len(code) == 4,
@@ -60,6 +61,49 @@ def scenario(store, label):
     check(h({"op": "join", "k": "K", "code": code, "pid": "a"}, now=late)["err"] == "nf", label + ": an expired room cannot be joined")
     codes = {h({"op": "create", "k": "K", "pid": "z", "st": ""})["code"] for _ in range(30)}
     check(len(codes) == 30, label + ": room codes do not collide")
+
+    # meet: the same passphrase (code) brings two players into one room
+    m = "m" + "0123456789abcdef01234567"
+    first = h({"op": "meet", "code": m, "pid": "a", "mode": "main", "st": "M0"})
+    check(first["ok"] and first["made"] and first["slot"] == 0 and first["code"] == m and first["st"] == "M0" and not first["p1"],
+          label + ": the first player to meet makes the room")
+    second = h({"op": "meet", "code": m, "pid": "b", "mode": "main", "st": "OTHER"})
+    check(second["ok"] and not second["made"] and second["slot"] == 1 and second["p1"] and second["st"] == "M0",
+          label + ": the second player with the same passphrase joins it (and keeps its state)")
+    check(h({"op": "meet", "code": m, "pid": "a", "st": "X"})["slot"] == 0 and h({"op": "meet", "code": m, "pid": "b", "st": "X"})["slot"] == 1,
+          label + ": both come back to their seats with the same passphrase")
+    check(h({"op": "meet", "code": m, "pid": "c", "st": "X"})["err"] == "full", label + ": a third player with the passphrase is refused")
+    other = h({"op": "meet", "code": "m" + "f" * 24, "pid": "a", "st": "N"})
+    check(other["ok"] and other["made"] and other["code"] != m, label + ": another passphrase makes another room")
+    check(h({"op": "meet", "code": "1234", "pid": "a"})["err"] == "bad" and h({"op": "meet", "code": "m12", "pid": "a"})["err"] == "bad",
+          label + ": meet does not reach the numbered rooms or short codes")
+    check(h({"op": "join", "code": m, "pid": "b"})["slot"] == 1 and h({"op": "get", "code": m, "slot": 1})["ok"],
+          label + ": a passphrase room works with join and get like any room")
+    check(h({"op": "meet", "code": "m" + "1" * 40, "pid": "a"})["err"] == "nf", label + ": an overlong code is refused")
+    again = h({"op": "meet", "code": m, "pid": "b", "st": "FRESH"}, now=late)
+    check(again["ok"] and again["made"] and again["slot"] == 0 and again["st"] == "FRESH", label + ": an expired passphrase room is made anew")
+
+
+class RaceStore(room.MemStore):
+    """The partner makes the room between our look and our create."""
+
+    def __init__(self, partner_room):
+        super().__init__()
+        self.partner_room = partner_room
+        self.raced = False
+
+    def create(self, r, now):
+        if not self.raced:
+            self.raced = True
+            self.rooms[self.partner_room["code"]] = dict(self.partner_room)
+            return False
+        return super().create(r, now)
+
+
+race_code = "m" + "a" * 24
+race = RaceStore(room._new_room(race_code, "partner", "P0", "main", 1000))
+r = room.handle({"op": "meet", "code": race_code, "pid": "me", "st": "MINE"}, race, now=1000, key="")
+check(r["ok"] and not r["made"] and r["slot"] == 1 and r["st"] == "P0", "meet: two players meeting at once end up in one room")
 
 
 scenario(room.MemStore(), "memory")

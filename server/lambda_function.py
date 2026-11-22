@@ -15,6 +15,7 @@ KEY = os.environ.get("EI_KEY", "")
 TABLE = os.environ.get("EI_TABLE", "ExitInterviewRooms")
 ROOM_DAYS = 30
 MAX_STATE = 60000
+MAX_CODE = 40
 
 
 def _build():
@@ -113,9 +114,29 @@ class DynamoStore:
             raise
 
 
-def _reply(room, ok, err, slot, now):
+def _reply(room, ok, err, slot, now, made=False):
     return {"ok": ok, "err": err, "code": room["code"], "slot": slot, "ver": room["ver"], "st": room["st"],
-            "v": [room["v0"], room["v1"]], "s": [room["s0"], room["s1"]], "p1": bool(room["p1"]), "mode": room["mode"], "now": now}
+            "v": [room["v0"], room["v1"]], "s": [room["s0"], room["s1"]], "p1": bool(room["p1"]), "mode": room["mode"], "now": now,
+            "made": made}
+
+
+def _new_room(code, pid, st, mode, now):
+    return {"code": code, "ver": 1, "st": st or "", "mod": "{}", "mode": str(mode or "main")[:8],
+            "p0": pid, "p1": "", "v0": "", "v1": "", "s0": now, "s1": 0, "exp": now + ROOM_DAYS * 86400}
+
+
+def _take_seat(store, room, pid, now):
+    """Seats a player in a room: the creator keeps seat 1, the first other player gets seat 2. None when full."""
+    if pid == room["p0"]:
+        slot = 0
+    elif not room["p1"] or room["p1"] == pid:
+        slot = 1
+    else:
+        return None, None
+    sets = {"s%d" % slot: now}
+    if slot == 1:
+        sets["p1"] = pid
+    return slot, store.update(room["code"], sets) or room
 
 
 def _fail(err, now):
@@ -128,7 +149,9 @@ def handle(q, store, now=None, key=None):
     key = KEY if key is None else key
     if not isinstance(q, dict):
         return _fail("bad", now)
-    if key and q.get("k") != key:
+    # The key is optional: from 0.1.3 the app meets by passphrase without one. A request that carries a wrong key
+    # (an older app with an outdated URL) is still told so.
+    if key and "k" in q and q.get("k") != key:
         return _fail("key", now)
     op = q.get("op")
     st = q.get("st")
@@ -141,32 +164,43 @@ def handle(q, store, now=None, key=None):
     if op == "create":
         pid = str(q.get("pid") or "")[:64]
         for _ in range(60):
-            room = {"code": "%04d" % random.randrange(10000), "ver": 1, "st": st or "", "mod": "{}", "mode": str(q.get("mode") or "main")[:8],
-                    "p0": pid, "p1": "", "v0": "", "v1": "", "s0": now, "s1": 0, "exp": now + ROOM_DAYS * 86400}
+            room = _new_room("%04d" % random.randrange(10000), pid, st, q.get("mode"), now)
             if store.create(room, now):
                 return _reply(room, True, None, 0, now)
         return _fail("busy", now)
 
     code = q.get("code")
-    if not isinstance(code, str) or not (1 <= len(code) <= 8):
+    if not isinstance(code, str) or not (1 <= len(code) <= MAX_CODE):
         return _fail("nf", now)
     slot = 1 if q.get("slot") == 1 else 0
+
+    if op == "meet":
+        # Two players who type the same passphrase end up in the same room. The code is a hash of the passphrase
+        # (made by the app, starting with "m"). Take a seat if the room is there, else make it. When both try to
+        # make it at once, only one create succeeds and the other takes a seat on the next round.
+        if not code.startswith("m") or len(code) < 9:
+            return _fail("bad", now)
+        pid = str(q.get("pid") or "")[:64]
+        for _ in range(4):
+            room = store.get(code, True)
+            if room is not None and room["exp"] > now:
+                slot, room = _take_seat(store, room, pid, now)
+                if room is None:
+                    return _fail("full", now)
+                return _reply(room, True, None, slot, now)
+            room = _new_room(code, pid, st, q.get("mode"), now)
+            if store.create(room, now):
+                return _reply(room, True, None, 0, now, made=True)
+        return _fail("busy", now)
 
     if op == "join":
         pid = str(q.get("pid") or "")[:64]
         room = store.get(code, True)
         if room is None or room["exp"] <= now:
             return _fail("nf", now)
-        if pid == room["p0"]:
-            slot = 0
-        elif not room["p1"] or room["p1"] == pid:
-            slot = 1
-        else:
+        slot, room = _take_seat(store, room, pid, now)
+        if room is None:
             return _fail("full", now)
-        sets = {"s%d" % slot: now}
-        if slot == 1:
-            sets["p1"] = pid
-        room = store.update(code, sets) or room
         return _reply(room, True, None, slot, now)
 
     if op == "get":

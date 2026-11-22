@@ -24,13 +24,16 @@ fun main() {
     check(b("$host/") == "$host/" && b(host) == "$host/" && b("  $host\n") == "$host/", "the built-in address is read with or without a closing slash")
     check(b("http://192.168.0.5:8080") == "http://192.168.0.5:8080/", "a built-in address keeps its port")
     check(b("") == null && b("abc") == null && b("https://") == null && b("$host/#k") == null && b("$host/?k=1") == null, "an empty or odd built-in address is refused")
-    // The same values as server/set-passphrase.sh (Python) and Node give; keep the two in step.
-    val k = ServerAddress::keyOf
-    check(k("テスト合言葉") == "3eb24f415a2976bbe1b55c234b0ec583", "the passphrase gives the same key as server/set-passphrase.sh")
-    check(k("  ﾃｽﾄ合言葉　") == k("テスト合言葉"), "half-width kana and spaces around the passphrase do not matter")
-    check(k("ＡＢＣ１２３") == "ac9409d69213deef95620c4d09ee139d" && k("ABC123") == k("ＡＢＣ１２３"), "full-width and half-width letters give the same key")
-    check(k("") == null && k("   ") == null, "an empty passphrase gives no key")
-    check(k("abc") != k("ABC"), "upper and lower case letters are different")
+    // The room code two players meet in (the same values Node gives). Changing it would part players who already play.
+    val c = ServerAddress::roomCodeOf
+    check(c("main", "テスト合言葉") == "m106d8902ccb82f09b26b9f1c", "the passphrase gives a fixed room code")
+    check(c("main", "  ﾃｽﾄ合言葉　") == c("main", "テスト合言葉"), "half-width kana and spaces around the passphrase do not matter")
+    check(c("main", "ＡＢＣ１２３") == "m07183eef3cb60ff65e7426f3" && c("main", "ABC123") == c("main", "ＡＢＣ１２３"), "full-width and half-width letters give the same room")
+    check(c("test", "テスト合言葉") == "m8ccab5c1b6f36b9b6b162362", "a test room never meets a real one with the same passphrase")
+    check(c("main", "") == null && c("main", "   ") == null, "an empty passphrase gives no room")
+    check(c("main", "abc") != c("main", "ABC"), "upper and lower case letters are different")
+    check(c("main", "x")!!.length == 25 && ServerAddress.isPassphraseRoom(c("main", "x")!!) && !ServerAddress.isPassphraseRoom("0427"),
+        "a passphrase room code is m and 24 characters, unlike a numbered room")
     println(if (fails == 0) "ALL OK" else "$fails FAILED")
     exitProcess(if (fails == 0) 0 else 1)
 }

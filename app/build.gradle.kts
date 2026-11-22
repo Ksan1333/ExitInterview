@@ -16,7 +16,7 @@ val signing = Properties().apply {
 val hasReleaseSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !signing.getProperty(it).isNullOrBlank() }
 
 // サーバーのアドレス（鍵なし）。リポジトリの直下に置く server-base.txt（コミットしない）から読み、APK の assets/server_base.txt に入れる。
-// 遊ぶ人は、2人で決めたサーバーの合言葉を入れるだけでよくなる（鍵は合言葉から作る。server/set-passphrase.sh）。
+// 遊ぶ人はサーバーの設定をしなくてよい（2人は合言葉でつながる。サーバーは鍵のない要求も受け付ける）。
 // リポジトリは公開なので、鍵（/k/ の後ろ）は書かない。書いてあればビルドを止める。
 val serverBase = rootProject.file("server-base.txt").takeIf { it.isFile }?.readText()?.trim().orEmpty()
 if (serverBase.contains("/k/") || serverBase.contains("#") || serverBase.contains("?")) {
@@ -27,7 +27,7 @@ serverBaseDir.mkdirs()
 File(serverBaseDir, "server_base.txt").writeText(serverBase)
 
 // 版。GitHub の Release のタグ（v0.1.0）と同じにする。KsanHub はこれを比べて更新があるかを決める。上げるときは versionCode も 1 増やす
-val appVersion = "0.1.2"
+val appVersion = "0.1.3"
 
 android {
     namespace = "com.ksan.exitinterview"
@@ -38,7 +38,7 @@ android {
         applicationId = "com.ksan1333.exitinterview"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
+        versionCode = 4
         versionName = appVersion
     }
 

@@ -43,7 +43,8 @@ def check(ok, what):
 
 
 def sh(*args, cwd=None, env=None, stdin=None):
-    r = subprocess.run(list(args), cwd=cwd, env=env, input=stdin, capture_output=True, text=True)
+    # utf-8 with replacement: on Windows the aws command line may print in the local code page (cp932)
+    r = subprocess.run(list(args), cwd=cwd, env=env, input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode, r.stdout + r.stderr
 
 
