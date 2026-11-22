@@ -82,7 +82,7 @@ fun GameScreen(game: GameApp) {
             }
         }
         if (!game.netOk) {
-            Label("つうしん ちゅう…", 13.sp, Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp), color = Ui.Accent)
+            Label("通信中…", 13.sp, Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp), color = Ui.Accent)
         }
         when (game.overlay) {
             Overlay.MENU -> MenuOverlay(game)
@@ -160,12 +160,12 @@ private fun Hud(game: GameApp, pack: Pack, view: ViewDef, u: Dp, fs: (Float) -> 
                 drawCircle(color = Ui.Text, radius = size.height * 0.24f)
             }
             Spacer(Modifier.width(u * 8))
-            Label("あいぼう：" + partner.name, fs(15f))
+            Label("相棒：" + partner.name, fs(15f))
         }
     }
     if (game.solo) {
         Box(at(748, 10, 124, 44).then(chip).clickable { game.switchSeat() }, contentAlignment = Alignment.Center) {
-            Label("そうさ：" + (game.slot + 1), fs(15f), color = Ui.Accent)
+            Label("操作：" + (game.slot + 1), fs(15f), color = Ui.Accent)
         }
     }
     Box(at(884, 10, 64, 44).then(chip).clickable { game.overlay = Overlay.MENU }, contentAlignment = Alignment.Center) {
@@ -175,7 +175,7 @@ private fun Hud(game: GameApp, pack: Pack, view: ViewDef, u: Dp, fs: (Float) -> 
     if (view.right != null) Arrow(at(826, 238, 44, 64).then(chip), false) { game.go(view.right) }
     if (view.back != null) {
         Box(at(14, 472, 78, 54).then(chip).clickable { game.go(view.back) }, contentAlignment = Alignment.Center) {
-            Label("もどる", fs(15f))
+            Label("戻る", fs(15f))
         }
     }
 
@@ -237,14 +237,14 @@ private fun Sheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
 private fun MenuOverlay(game: GameApp) {
     Sheet(onDismiss = { game.overlay = Overlay.NONE }) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            Label("あいことば " + game.roomCode, 15.sp, color = Ui.Dim)
+            Label("合言葉 " + game.roomCode, 15.sp, color = Ui.Dim)
             PlainButton("ヒント", 18.sp, strong = true) {
                 game.hintFocus = null
                 game.overlay = Overlay.HINT
             }
-            PlainButton(if (game.soundOn) "おと：オン" else "おと：オフ", 16.sp) { game.toggleSound() }
-            PlainButton("タイトルへ もどる", 16.sp) { game.leaveToTitle(false) }
-            PlainButton("とじる", 16.sp) { game.overlay = Overlay.NONE }
+            PlainButton(if (game.soundOn) "音：オン" else "音：オフ", 16.sp) { game.toggleSound() }
+            PlainButton("タイトルへ戻る", 16.sp) { game.leaveToTitle(false) }
+            PlainButton("閉じる", 16.sp) { game.overlay = Overlay.NONE }
         }
     }
 }
@@ -256,9 +256,9 @@ private fun HintOverlay(game: GameApp, pack: Pack) {
     Sheet(onDismiss = { game.overlay = Overlay.NONE }) {
         if (focus == null) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Label(if (open.isEmpty()) "いまは ヒントが ありません" else "どこの ヒント？", 18.sp, color = Ui.Accent)
+                Label(if (open.isEmpty()) "今はヒントがありません" else "どこのヒント？", 18.sp, color = Ui.Accent)
                 for (p in open) PlainButton(p.name, 17.sp) { game.hintFocus = p.id }
-                PlainButton("とじる", 15.sp) { game.overlay = Overlay.NONE }
+                PlainButton("閉じる", 15.sp) { game.overlay = Overlay.NONE }
             }
         } else {
             val level = Rules.hintLevel(game.state, focus.id)
@@ -266,22 +266,22 @@ private fun HintOverlay(game: GameApp, pack: Pack) {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Label(focus.name, 18.sp, color = Ui.Accent)
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (level == 0) Label("ヒントは 3だんかい。ひらくと ふたりの がめんに 出ます。", 15.sp, color = Ui.Dim)
+                    if (level == 0) Label("ヒントは3段階。開くと2人の画面に出ます。", 15.sp, color = Ui.Dim)
                     for (i in 0 until minOf(level, 3)) Label("ヒント${i + 1}：" + focus.hints.getOrElse(i) { "" }, 16.sp)
-                    if (level >= Rules.MAX_HINT) Label("こたえ：" + focus.answer, 16.sp, color = Ui.Accent)
+                    if (level >= Rules.MAX_HINT) Label("答え：" + focus.answer, 16.sp, color = Ui.Accent)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (level < 3) {
-                        PlainButton("ヒント${level + 1}を ひらく", 15.sp, strong = true) { game.revealHint(focus.id) }
+                        PlainButton("ヒント${level + 1}を開く", 15.sp, strong = true) { game.revealHint(focus.id) }
                     } else if (level == 3) {
-                        PlainButton("こたえを 見る", 15.sp, strong = true) { game.revealHint(focus.id) }
+                        PlainButton("答えを見る", 15.sp, strong = true) { game.revealHint(focus.id) }
                     } else {
-                        PlainButton(if (armed) "ほんとうに スキップ" else "スキップ する", 15.sp) {
+                        PlainButton(if (armed) "本当にスキップ" else "スキップする", 15.sp) {
                             if (armed) game.skipPuzzle(focus.id) else armed = true
                         }
                     }
-                    PlainButton("べつの ヒント", 15.sp) { game.hintFocus = null }
-                    PlainButton("とじる", 15.sp) { game.overlay = Overlay.NONE }
+                    PlainButton("別のヒント", 15.sp) { game.hintFocus = null }
+                    PlainButton("閉じる", 15.sp) { game.overlay = Overlay.NONE }
                 }
             }
         }

@@ -33,7 +33,7 @@ import com.ksan.exitinterview.engine.Rules
 fun AppRoot(game: GameApp) {
     Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         when (game.screen) {
-            Screen.LOADING -> Label("よみこみ ちゅう…", 20.sp)
+            Screen.LOADING -> Label("読み込み中…", 20.sp)
             Screen.TITLE -> TitleScreen(game)
             Screen.TEST_MENU -> TestMenu(game)
             Screen.JOIN -> JoinScreen(game)
@@ -78,32 +78,32 @@ private fun onBack(game: GameApp) {
 private fun TitleScreen(game: GameApp) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Label("Exit Interview", 46.sp, color = Ui.Accent)
-        Label("でられたら ごうかく", 15.sp, color = Ui.Dim)
+        Label("出られたら合格", 15.sp, color = Ui.Dim)
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlainButton("へやを つくる", 18.sp, enabled = !game.busy, strong = true) { game.createRoom("main", false, false) }
-            PlainButton("へやに はいる", 18.sp, enabled = !game.busy) { game.screen = Screen.JOIN }
+            PlainButton("部屋を作る", 18.sp, enabled = !game.busy, strong = true) { game.createRoom("main", false, false) }
+            PlainButton("部屋に入る", 18.sp, enabled = !game.busy) { game.screen = Screen.JOIN }
         }
         val saved = game.savedCode
         if (saved.isNotEmpty()) {
-            PlainButton("つづきから（$saved）", 16.sp, enabled = !game.busy) { game.joinRoom(saved) }
+            PlainButton("続きから（$saved）", 16.sp, enabled = !game.busy) { game.joinRoom(saved) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlainButton("テストべや", 15.sp, enabled = !game.busy) { game.screen = Screen.TEST_MENU }
-            PlainButton("せってい", 15.sp) { game.screen = Screen.SETTINGS }
+            PlainButton("テスト部屋", 15.sp, enabled = !game.busy) { game.screen = Screen.TEST_MENU }
+            PlainButton("設定", 15.sp) { game.screen = Screen.SETTINGS }
         }
-        if (!game.hasServer()) Label("サーバーが まだ せってい されて いません（せってい から）", 13.sp, color = Ui.Red)
+        if (!game.hasServer()) Label("サーバーがまだ設定されていません（「設定」から）", 13.sp, color = Ui.Red)
     }
 }
 
 @Composable
 private fun TestMenu(game: GameApp) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Label("テストべや", 26.sp, color = Ui.Accent)
-        PlainButton("ひとりで（つうしん なし）", 17.sp, enabled = !game.busy) { game.createRoom("test", true, true) }
-        PlainButton("ひとりで（サーバーを つかう）", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom("test", true, false) }
-        PlainButton("ふたりで", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom("test", false, false) }
-        PlainButton("もどる", 15.sp) { game.screen = Screen.TITLE }
+        Label("テスト部屋", 26.sp, color = Ui.Accent)
+        PlainButton("1人で（通信なし）", 17.sp, enabled = !game.busy) { game.createRoom("test", true, true) }
+        PlainButton("1人で（サーバーを使う）", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom("test", true, false) }
+        PlainButton("2人で", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom("test", false, false) }
+        PlainButton("戻る", 15.sp) { game.screen = Screen.TITLE }
     }
 }
 
@@ -111,7 +111,7 @@ private fun TestMenu(game: GameApp) {
 private fun JoinScreen(game: GameApp) {
     var code by remember { mutableStateOf("") }
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Label("あいことば", 16.sp, color = Ui.Dim)
+        Label("合言葉", 16.sp, color = Ui.Dim)
         Label(code.padEnd(4, '・'), 44.sp, color = Ui.Accent)
         for (row in listOf("12345", "67890")) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -121,9 +121,9 @@ private fun JoinScreen(game: GameApp) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlainButton("もどる", 16.sp) { game.screen = Screen.TITLE }
-            PlainButton("けす", 16.sp) { code = code.dropLast(1) }
-            PlainButton("はいる", 16.sp, enabled = code.length == 4 && !game.busy, strong = true) { game.joinRoom(code) }
+            PlainButton("戻る", 16.sp) { game.screen = Screen.TITLE }
+            PlainButton("消す", 16.sp) { code = code.dropLast(1) }
+            PlainButton("入る", 16.sp, enabled = code.length == 4 && !game.busy, strong = true) { game.joinRoom(code) }
         }
     }
 }
@@ -131,13 +131,13 @@ private fun JoinScreen(game: GameApp) {
 @Composable
 private fun LobbyScreen(game: GameApp) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Label("あいことば", 16.sp, color = Ui.Dim)
+        Label("合言葉", 16.sp, color = Ui.Dim)
         Label(game.roomCode, 64.sp, color = Ui.Accent)
-        Label(if (game.partnerJoined) "あいぼうが きました" else "あいぼうを まっています…", 18.sp)
+        Label(if (game.partnerJoined) "相棒が来ました" else "相棒を待っています…", 18.sp)
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             PlainButton("やめる", 16.sp) { game.leaveToTitle(true) }
-            PlainButton("はじめる", 18.sp, strong = true) { game.beginPlay() }
+            PlainButton("始める", 18.sp, strong = true) { game.beginPlay() }
         }
     }
 }
@@ -145,15 +145,15 @@ private fun LobbyScreen(game: GameApp) {
 @Composable
 private fun SettingsScreen(game: GameApp) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Label("せってい", 26.sp, color = Ui.Accent)
-        PlainButton(if (game.soundOn) "おと：オン" else "おと：オフ", 17.sp) { game.toggleSound() }
+        Label("設定", 26.sp, color = Ui.Accent)
+        PlainButton(if (game.soundOn) "音：オン" else "音：オフ", 17.sp) { game.toggleSound() }
         val host = game.server.substringAfter("//").substringBefore("/").take(34)
-        Label(if (game.hasServer()) "サーバー：$host" else "サーバー：みせってい", 14.sp, color = Ui.Dim)
+        Label(if (game.hasServer()) "サーバー：$host" else "サーバー：未設定", 14.sp, color = Ui.Dim)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlainButton("クリップボードから はりつけ", 15.sp) { game.pasteServer() }
-            PlainButton("もとに もどす", 15.sp) { game.clearServer() }
+            PlainButton("クリップボードから貼り付け", 15.sp) { game.pasteServer() }
+            PlainButton("元に戻す", 15.sp) { game.clearServer() }
         }
-        PlainButton("もどる", 15.sp) { game.screen = Screen.TITLE }
+        PlainButton("戻る", 15.sp) { game.screen = Screen.TITLE }
     }
 }
 
@@ -181,8 +181,8 @@ private fun EndingScreen(game: GameApp) {
                 for (line in letter) Label(line, 22.sp, color = Ui.Ink)
             }
         }
-        Label("かかった じかん：${sec / 60}ふん ${sec % 60}びょう", 16.sp)
-        Label("ヒント：${game.state.f(Rules.N_HINT)}かい　スキップ：${game.state.f(Rules.N_SKIP)}かい", 16.sp)
+        Label("かかった時間：${sec / 60}分${sec % 60}秒", 16.sp)
+        Label("ヒント：${game.state.f(Rules.N_HINT)}回　スキップ：${game.state.f(Rules.N_SKIP)}回", 16.sp)
         Spacer(Modifier.height(4.dp))
         PlainButton("タイトルへ", 16.sp) { game.leaveToTitle(true) }
     }

@@ -85,7 +85,7 @@ class GameApp(private val ctx: Context) {
                 pack = withContext(Dispatchers.IO) { Pack.decode(ctx.assets.open("stage.pack").use { it.readBytes() }) }
                 screen = Screen.TITLE
             } catch (e: Exception) {
-                notice = "ステージを よみこめません"
+                notice = "ステージを読み込めません"
             }
         }
     }
@@ -114,10 +114,10 @@ class GameApp(private val ctx: Context) {
     }
 
     private fun netMessage(e: IOException): String = when ((e as? RoomException)?.reason) {
-        "nf" -> "その あいことばの へやは ありません"
-        "full" -> "その へやは まんいん です"
-        "key" -> "サーバーの あいことばが ちがいます"
-        else -> "つうしん できません"
+        "nf" -> "その合言葉の部屋はありません"
+        "full" -> "その部屋は満員です"
+        "key" -> "サーバーの合言葉が違います"
+        else -> "通信できません"
     }
 
     // ---------------------------------------------------------------- rooms
@@ -128,7 +128,7 @@ class GameApp(private val ctx: Context) {
         if (busy) return
         val c = client(local)
         if (c == null) {
-            notice = "サーバーが せってい されて いません"
+            notice = "サーバーが設定されていません"
             return
         }
         busy = true
@@ -150,7 +150,7 @@ class GameApp(private val ctx: Context) {
         if (busy) return
         val c = client(false)
         if (c == null) {
-            notice = "サーバーが せってい されて いません"
+            notice = "サーバーが設定されていません"
             return
         }
         busy = true
@@ -254,7 +254,7 @@ class GameApp(private val ctx: Context) {
                 } catch (e: RoomException) {
                     withContext(Dispatchers.Main) {
                         if (e.reason == "nf") {
-                            notice = "へやが なくなりました"
+                            notice = "部屋がなくなりました"
                             leaveToTitle(true)
                         } else {
                             netOk = false
@@ -419,9 +419,9 @@ class GameApp(private val ctx: Context) {
         if (text.startsWith("http") && text.indexOf('#') > 0) {
             server = text
             prefs.edit().putString("server", text).apply()
-            notice = "サーバーを せってい しました"
+            notice = "サーバーを設定しました"
         } else {
-            notice = "クリップボードに サーバーの あいことばが ありません"
+            notice = "クリップボードにサーバーの合言葉がありません"
         }
     }
 
