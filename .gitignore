@@ -11,3 +11,7 @@ __pycache__/
 *.pyc
 /spoiler/out/
 .DS_Store
+/dist/
+/signing.properties
+*.jks
+*.keystore

@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `app/` | アプリ本体（画面、通信、音）。謎の内容は入っていない | 開いてよい |
 | `server/` | 部屋サーバー（AWS用と手元用） | 開いてよい |
-| `tools/` | 検証スクリプト、効果音の生成 | 開いてよい |
+| `tools/` | 検証スクリプト、効果音とロゴの生成 | 開いてよい |
 | `spoiler/` | ステージ定義、絵の生成、答え入りの検証 | **開かない** |
 | `app/src/main/assets/stage.pack` | 暗号化したステージ一式 | 開いても読めない |
 
@@ -26,12 +26,58 @@
 ## ビルド（Android Studio）
 
 1. このリポジトリを Android Studio で開く。
-2. Gradle の同期が終わったら、`app` を実機で実行する（または Build → Build APK(s)）。
-3. できた APK を友人に渡す。同じ APK を2人で使う。
+2. Gradle の同期が終わったら、`app` を実機で実行する（debug 版。署名の設定は要らない）。
+3. 友人に渡す・KsanHub から入れるのは、下の「配布用の APK」。同じ APK を2人で使う。
 
 - Gradle 8.10.2、Android Gradle Plugin 8.7.3、compileSdk 35 を使います。
 - Gradle JDK は 17〜21 を選んでください（Settings → Build Tools → Gradle → Gradle JDK）。
 - GitHub Actions は使いません。
+- パッケージ名（applicationId）は `com.ksan1333.exitinterview` です。
+- debug 版と配布用の版は署名が違います。同じ端末で入れ替えるときは、前のものを消してから入れます。
+
+### 配布用の APK（KsanHub から入れる版）
+
+KsanHub の「Exit Interview」は、このリポジトリの最新の Release に付けた `ExitInterview-<版>.apk` を入れます。Release を作るまでは、KsanHub には「リリース待ち」と出ます。
+
+1. 初回だけ、署名の鍵を作る。鍵は 1 つだけで、作り直さない・消さない・コミットしない（作り直すと、入っている Exit Interview を更新できなくなる）。
+
+   ```powershell
+   mkdir "$env:USERPROFILE\Documents\Claude\.exitinterview"
+   keytool -genkeypair -v -keystore "$env:USERPROFILE\Documents\Claude\.exitinterview\exitinterview-release.jks" -alias exitinterview -keyalg RSA -keysize 2048 -validity 10000
+   ```
+
+   （`keytool` は Android Studio の `jbr\bin` にあります。）
+
+2. リポジトリの直下に `signing.properties` を置く（`.gitignore` 済み）。パスの区切りは `/` で書く。
+
+   ```properties
+   storeFile=C:/Users/<ユーザー名>/Documents/Claude/.exitinterview/exitinterview-release.jks
+   storePassword=<鍵を作るときに決めたパスワード>
+   keyAlias=exitinterview
+   keyPassword=<同じパスワード>
+   ```
+
+3. APK を作る。`dist\ExitInterview-<版>.apk` ができる。
+
+   ```powershell
+   .\gradlew.bat distApk
+   ```
+
+4. 持ち主が Release を作る（タグは `v<版>`。添付は APK だけ）。
+
+   ```powershell
+   gh release create v0.1.0 dist\ExitInterview-0.1.0.apk --repo Ksan1333/ExitInterview --target main --title "Exit Interview 0.1.0" --notes-file docs\RELEASE_NOTES.md
+   ```
+
+版を上げるときは、`app/build.gradle.kts` の `appVersion` と `versionCode`、[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) を書き換えます。KsanHub は Release のタグとアプリの版を比べて、更新があるかを決めます。
+
+### ロゴ
+
+ランチャーのアイコンと KsanHub の一覧のアイコンは、[`tools/make_icon.py`](tools/make_icon.py) が描きます（半開きのドア。ステージの絵と同じ描き方）。
+
+```
+python3 tools/make_icon.py --ksanhub <scoop-bucket の icons フォルダ>
+```
 
 ## サーバーを置く
 
@@ -56,7 +102,7 @@
 - URL の `/k/` の後ろは鍵です。この URL を知っている人だけが部屋を作れます。公開の場所（このリポジトリを含む）に書かないでください。配置のログ（KsanHub の画面と、スマホから配置したときは AWS の CloudWatch Logs）には出ます。
 - Windows（Git for Windows の bash）でも動きます。zip コマンドがなければ Node.js で、それもなければ Python でコードをまとめます。
 
-KsanHub の一覧（`Ksan1333/scoop-bucket` の `catalog.json`）での id は `exitinterview-server`、配置スクリプトは `server/deploy.sh`、判定に使うフォルダは `server` です。
+KsanHub の一覧（`Ksan1333/scoop-bucket` の `catalog.json`）では、サーバーが `exitinterview-server`（配置スクリプトは `server/deploy.sh`、判定に使うフォルダは `server`）、ゲーム本体が `exitinterview`（この Release の APK を入れる）です。
 
 ### サーバーの URL をゲームに入れる
 
@@ -107,4 +153,5 @@ tools/verify.sh
 
 - フォント：Yomogi（SIL Open Font License 1.1、[`licenses/Yomogi-OFL.txt`](licenses/Yomogi-OFL.txt)）
 - 効果音：`tools/make_sounds.py` で合成したもの
+- ロゴ：`tools/make_icon.py` で描いたもの
 - 絵：`spoiler/` のスクリプトで描いたもの
