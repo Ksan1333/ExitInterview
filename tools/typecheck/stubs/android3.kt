@@ -4,7 +4,9 @@ package android.graphics
 
 class Typeface
 
-class Bitmap
+class Bitmap {
+    fun prepareToDraw() {}
+}
 
 object BitmapFactory {
     fun decodeByteArray(data: ByteArray, offset: Int, length: Int): Bitmap? = null

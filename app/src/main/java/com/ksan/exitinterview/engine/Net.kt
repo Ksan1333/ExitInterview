@@ -10,21 +10,32 @@ interface Transport {
     fun post(body: String): String
 }
 
+/**
+ * Posts over HTTP(S). A reply that was read to the end leaves its connection open for the next request: making a
+ * new connection costs a TCP and TLS handshake (about three times as long as the request itself), so the connection
+ * is closed only after a failure.
+ */
 class HttpTransport(private val url: String) : Transport {
     override fun post(body: String): String {
         val c = URL(url).openConnection() as HttpURLConnection
+        var reusable = false
         try {
+            val bytes = body.toByteArray(Charsets.UTF_8)
             c.requestMethod = "POST"
             c.connectTimeout = 8000
             c.readTimeout = 8000
             c.doOutput = true
+            c.useCaches = false
+            c.setFixedLengthStreamingMode(bytes.size)
             c.setRequestProperty("Content-Type", "application/json")
-            c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            c.outputStream.use { it.write(bytes) }
             val code = c.responseCode
             if (code !in 200..299) throw IOException("http $code")
-            return c.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            val text = c.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
+            reusable = true
+            return text
         } finally {
-            c.disconnect()
+            if (!reusable) c.disconnect()
         }
     }
 }
@@ -268,6 +279,22 @@ class Session(val pack: Pack, private val client: RoomClient, val code: String, 
     private val lock = Any()
     private val pending = ArrayList<Intent>()
 
+    /**
+     * The server's clock minus this device's clock, in seconds, from the newest reply. Timed things are judged
+     * by each device, so both phones count in the server's time and agree even when their own clocks do not.
+     */
+    @Volatile
+    var clockOffset: Int = 0
+        private set
+
+    init {
+        noteClock(first)
+    }
+
+    private fun noteClock(s: Snapshot) {
+        if (s.now > 0) clockOffset = s.now - (System.currentTimeMillis() / 1000).toInt()
+    }
+
     /** Runs an action now and queues it for sending. Call from the screen. */
     fun submit(intent: Intent): Outcome? = synchronized(lock) {
         val out = intent(state)
@@ -296,7 +323,9 @@ class Session(val pack: Pack, private val client: RoomClient, val code: String, 
 
     /** Fetches the newest room state. Pass [view] to tell the partner where this player is. */
     fun poll(view: String?) {
-        adopt(client.get(code, slot, view), 0)
+        val s = client.get(code, slot, view)
+        noteClock(s)
+        adopt(s, 0)
     }
 
     /** Sends queued actions in one request. Returns true if a request was made. Call from one background loop. */
@@ -321,6 +350,7 @@ class Session(val pack: Pack, private val client: RoomClient, val code: String, 
             return false
         }
         val (ok, next) = client.put(code, slot, base.ver, reads, writes, view)
+        noteClock(next)
         adopt(next, if (ok) batch.size else 0)
         return true
     }

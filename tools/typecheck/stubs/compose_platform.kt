@@ -9,3 +9,7 @@ class CompositionLocal<T> {
 }
 
 val LocalDensity = CompositionLocal<Density>()
+
+interface ViewConfiguration {
+    val touchSlop: Float
+}

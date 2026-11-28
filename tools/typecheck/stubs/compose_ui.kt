@@ -14,6 +14,7 @@ interface Alignment {
 
     companion object {
         val TopStart: Alignment = object : Alignment {}
+        val TopCenter: Alignment = object : Alignment {}
         val Center: Alignment = object : Alignment {}
         val BottomCenter: Alignment = object : Alignment {}
         val BottomEnd: Alignment = object : Alignment {}

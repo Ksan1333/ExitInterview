@@ -32,6 +32,12 @@ class Fx {
     var shake = false
     var go: String? = null
     var unsel = false
+
+    /** A short line shown on the acting device only ("It is locked." and the like). */
+    var msg: String? = null
+
+    /** A question to answer by typing ([Pack.asks]); the acting device opens it. */
+    var ask: String? = null
 }
 
 /**
@@ -101,6 +107,8 @@ object Rules {
             "has" -> n(a.asStr() ?: "") >= (if (b == null) 1 else b.asInt())
             "sel" -> sel != null && sel == a.asStr()
             "cool" -> now < f(a.asStr() ?: "")
+            // ["within", flag, seconds]: the time in flag (such as t0, when the game began) is less than seconds ago
+            "within" -> f(a.asStr() ?: "").let { it != 0 && now - it < b.asInt() }
             "all" -> c.drop(1).all { testWith(it, f, n, sel, now) }
             "any" -> c.drop(1).any { testWith(it, f, n, sel, now) }
             "not" -> !testWith(a, f, n, sel, now)
@@ -126,6 +134,8 @@ object Rules {
                 "sfx" -> a.asStr()?.let { w.fx.sfx.add(it) }
                 "shake" -> w.fx.shake = true
                 "unsel" -> w.fx.unsel = true
+                "msg" -> w.fx.msg = a.asStr()
+                "ask" -> w.fx.ask = a.asStr()
                 "cool" -> w.setF(a.asStr() ?: "", w.now + b.asInt())
                 "if" -> {
                     val yes = w.test(a)
@@ -197,11 +207,65 @@ object Rules {
         val view = pack.views[viewId] ?: return null
         val w = Work(st, sel, now, pack)
         if (w.f(STAGE) != view.stage || !w.test(view.cond)) return null
-        val spot = view.spots.firstOrNull { it.hit(x, y) && w.test(it.cond) } ?: return null
+        val spot = view.spots.firstOrNull { it.swipe == null && it.hit(x, y) && w.test(it.cond) } ?: return null
         run(spot.ops, w)
         if (w.f(T0) == 0) w.setF(T0, now)
         return w.outcome()
     }
+
+    /** A finger drawn across [viewId] from (x, y) in direction [dir] (0 up, 1 right, 2 down, 3 left). */
+    fun swipe(pack: Pack, st: GameState, viewId: String, x: Float, y: Float, dir: Int, sel: String?, now: Int): Outcome? {
+        val view = pack.views[viewId] ?: return null
+        val w = Work(st, sel, now, pack)
+        if (w.f(STAGE) != view.stage || !w.test(view.cond)) return null
+        val spot = view.spots.firstOrNull { (it.swipe == dir || it.swipe == Spot.ANY) && it.hit(x, y) && w.test(it.cond) } ?: return null
+        run(spot.ops, w)
+        if (w.f(T0) == 0) w.setF(T0, now)
+        return w.outcome()
+    }
+
+    /** A typed answer to the question [askId]. Null when the question is closed (the partner answered it already). */
+    fun answer(pack: Pack, st: GameState, askId: String, text: String, now: Int): Outcome? {
+        val q = pack.asks[askId] ?: return null
+        val w = Work(st, null, now, pack)
+        if (!w.test(q.cond)) return null
+        val said = normalize(text)
+        if (said.isEmpty()) return null
+        run(if (q.answers.any { normalize(it) == said }) q.ok else q.ng, w)
+        if (w.f(T0) == 0) w.setF(T0, now)
+        return w.outcome()
+    }
+
+    /** The held thing [a] used on the held thing [b]. Null when the two do not go together. */
+    fun combine(pack: Pack, st: GameState, a: String, b: String, now: Int): Outcome? {
+        if (a == b) return null
+        val w = Work(st, null, now, pack)
+        val c = pack.combos.firstOrNull { ((it.a == a && it.b == b) || (it.a == b && it.b == a)) } ?: return null
+        if (w.n(a) <= 0 || w.n(b) <= 0 || !w.test(c.cond)) return null
+        run(c.ops, w)
+        if (w.f(T0) == 0) w.setF(T0, now)
+        return w.outcome()
+    }
+
+    /**
+     * How typed answers are compared: full-width and half-width forms, upper and lower case, katakana and hiragana
+     * count as the same, and spaces and punctuation are left out.
+     */
+    fun normalize(text: String): String {
+        // after NFKC, full-width punctuation is already half-width; the long vowel mark ー is kept (it is part of words)
+        val t = java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC).lowercase()
+        val out = StringBuilder()
+        for (ch in t) {
+            when {
+                ch.isWhitespace() || ch in DROP -> Unit
+                ch in 'ァ'..'ヶ' -> out.append(ch - 0x60)
+                else -> out.append(ch)
+            }
+        }
+        return out.toString()
+    }
+
+    private const val DROP = "。、,.・!?「」『』()〜~-"
 
     /** Puzzles of the current stage that can be worked on now and are not finished. */
     fun openPuzzles(pack: Pack, st: GameState, now: Int): List<Puzzle> {

@@ -26,9 +26,23 @@ class DynText(
     val cond: Any?,
 )
 
-class Spot(val x: Float, val y: Float, val w: Float, val h: Float, val cond: Any?, val ops: List<Any?>) {
+/**
+ * A place in a view that reacts. A spot with [swipe] answers only to a finger drawn across it in that direction
+ * (0 up, 1 right, 2 down, 3 left, [ANY] any direction: rubbing), and never to a tap.
+ */
+class Spot(val x: Float, val y: Float, val w: Float, val h: Float, val cond: Any?, val ops: List<Any?>, val swipe: Int? = null) {
     fun hit(px: Float, py: Float): Boolean = px >= x && px <= x + w && py >= y && py <= y + h
+
+    companion object {
+        const val ANY = 4
+    }
 }
+
+/** A question answered by typing (from episode 2): [answers] are compared after [Rules.normalize]. */
+class AskDef(val id: String, val prompt: String, val answers: List<String>, val cond: Any?, val ok: List<Any?>, val ng: List<Any?>)
+
+/** Two held things that become something else when one is picked and the other tapped (from episode 2). */
+class ComboDef(val a: String, val b: String, val cond: Any?, val ops: List<Any?>)
 
 class ViewDef(
     val id: String,
@@ -44,7 +58,18 @@ class ViewDef(
     val spots: List<Spot>,
 )
 
-class ItemDef(val id: String, val img: String)
+/**
+ * A thing the players can hold. [name] and [desc] are shown when it is picked from the item bar, [big] is the
+ * picture shown when it is looked at closely and [back] its other side (packs before episode 2 have none of them).
+ */
+class ItemDef(
+    val id: String,
+    val img: String,
+    val name: String = "",
+    val desc: List<String> = emptyList(),
+    val big: String? = null,
+    val back: String? = null,
+)
 
 class Puzzle(
     val id: String,
@@ -86,6 +111,12 @@ class Pack private constructor(private val data: ByteArray, private val blobStar
     val stages: Map<Int, StageDef>
     val initial: GameState
     val startStage: Map<String, Int>
+    val asks: Map<String, AskDef>
+    val combos: List<ComboDef>
+
+    /** The episode's title and tagline for the title screen (empty in packs that have none). */
+    val title: String
+    val tagline: String
     private val imgs: Map<String, IntArray>
 
     init {
@@ -107,7 +138,18 @@ class Pack private constructor(private val data: ByteArray, private val blobStar
             )
         }
         views = vm
-        items = root["items"].asMap().mapValues { (id, raw) -> ItemDef(id, raw.asMap()["img"].asStr() ?: "") }
+        items = root["items"].asMap().mapValues { (id, raw) ->
+            val m = raw.asMap()
+            ItemDef(id, m["img"].asStr() ?: "", m["name"].asStr() ?: "", m["desc"].asList().map { it.asStr() ?: "" }, m["big"].asStr(), m["back"].asStr())
+        }
+        asks = root["asks"].asMap().mapValues { (id, raw) ->
+            val m = raw.asMap()
+            AskDef(id, m["q"].asStr() ?: "", m["ans"].asList().map { it.asStr() ?: "" }, m["when"], m["ok"].asList(), m["ng"].asList())
+        }
+        combos = root["combos"].asList().map {
+            val m = it.asMap()
+            ComboDef(m["a"].asStr() ?: "", m["b"].asStr() ?: "", m["when"], m["ops"].asList())
+        }
         puzzles = root["puzzles"].asList().map {
             val p = it.asMap()
             Puzzle(
@@ -149,6 +191,9 @@ class Pack private constructor(private val data: ByteArray, private val blobStar
         stages = sm
         initial = GameState.fromAny(root["init"])
         startStage = root["start"].asMap().mapValues { it.value.asInt() }
+        val meta = root["meta"].asMap()
+        title = meta["title"].asStr() ?: ""
+        tagline = meta["tagline"].asStr() ?: ""
         imgs = root["imgs"].asMap().mapValues { (_, raw) ->
             val a = raw.asList()
             intArrayOf(blobStart + a[0].asInt(), a[1].asInt())
@@ -191,7 +236,10 @@ class Pack private constructor(private val data: ByteArray, private val blobStar
 
     private fun parseSpot(m: Map<String, Any?>): Spot {
         val r = m["r"].asList()
-        return Spot(r.getOrNull(0).asF(), r.getOrNull(1).asF(), r.getOrNull(2).asF(), r.getOrNull(3).asF(), m["when"], m["ops"].asList())
+        return Spot(
+            r.getOrNull(0).asF(), r.getOrNull(1).asF(), r.getOrNull(2).asF(), r.getOrNull(3).asF(), m["when"], m["ops"].asList(),
+            if (m["sw"] == null) null else m["sw"].asInt(),
+        )
     }
 
     companion object {

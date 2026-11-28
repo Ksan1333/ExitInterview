@@ -6,6 +6,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,11 +18,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,12 +36,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -48,7 +60,12 @@ import com.ksan.exitinterview.engine.Pack
 import com.ksan.exitinterview.engine.Rules
 import com.ksan.exitinterview.engine.ViewDef
 import kotlinx.coroutines.delay
+import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
+
+/** How far (a part of the scene's width) a finger has to move to count as drawn across rather than a tap. */
+private const val SWIPE_PART = 0.05f
 
 /** The scene is laid out in a 960x540 space; [u] is the size of one such unit on this screen. */
 @Composable
@@ -79,6 +96,7 @@ fun GameScreen(game: GameApp) {
             if (view != null) {
                 SceneCanvas(game, pack, view, Modifier.fillMaxSize())
                 Hud(game, pack, view, u, fs)
+                Toast(game, u, fs)
             }
         }
         if (!game.netOk) {
@@ -87,9 +105,95 @@ fun GameScreen(game: GameApp) {
         when (game.overlay) {
             Overlay.MENU -> MenuOverlay(game)
             Overlay.HINT -> HintOverlay(game, pack)
+            Overlay.ITEM -> ItemOverlay(game, pack)
+            Overlay.ASK -> AskOverlay(game, pack)
             Overlay.NONE -> Unit
         }
     }
+}
+
+/** A line over the top of the scene. It has no tap handling, so taps go through to the scene below. */
+@Composable
+private fun Toast(game: GameApp, u: Dp, fs: (Float) -> TextUnit) {
+    @Suppress("UNUSED_VARIABLE") val tick = game.tick // read so that the line goes away on time
+    val line = game.toastNow() ?: return
+    Box(Modifier.offset(x = u * 180, y = u * 62).size(u * 600, u * 46), contentAlignment = Alignment.Center) {
+        Box(
+            Modifier.background(Ui.Panel, Ui.Corner).border(2.dp, Ui.Accent, Ui.Corner).padding(horizontal = u * 16, vertical = u * 6),
+            contentAlignment = Alignment.Center,
+        ) {
+            Label(line, fs(16f), align = TextAlign.Center)
+        }
+    }
+}
+
+/** The item picked from the bar, shown large with what it is. */
+@Composable
+private fun ItemOverlay(game: GameApp, pack: Pack) {
+    val def = pack.items[game.zoomItem ?: ""] ?: return
+    Sheet(onDismiss = { game.closeZoom() }) {
+        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1.4f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                val side = if (game.zoomBack) def.back else null
+                val img = game.images.get(pack, side ?: def.big ?: def.img)
+                if (img != null) Image(bitmap = img, contentDescription = null, modifier = Modifier.fillMaxSize())
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                if (def.name.isNotEmpty()) Label(def.name, 19.sp, color = Ui.Accent)
+                for (line in def.desc) Label(line, 15.sp)
+                Spacer(Modifier.height(4.dp))
+                if (def.back != null) PlainButton(if (game.zoomBack) "表にする" else "裏返す", 15.sp) { game.flipZoom() }
+                PlainButton("閉じる", 15.sp, strong = true) { game.closeZoom() }
+                PlainButton("選ぶのをやめる", 15.sp) { game.putDownItem() }
+            }
+        }
+    }
+}
+
+/** A question answered by typing. It sits at the top so that the keyboard does not cover it. */
+@Composable
+private fun AskOverlay(game: GameApp, pack: Pack) {
+    val q = pack.asks[game.askId ?: ""] ?: return
+    var text by remember(q.id) { mutableStateOf("") }
+    val focus = remember { FocusRequester() }
+    Box(Modifier.fillMaxSize().background(Ui.Scrim).clickable { game.closeAsk() }, contentAlignment = Alignment.TopCenter) {
+        Column(
+            Modifier.padding(top = 10.dp).fillMaxWidth(0.8f)
+                .background(Ui.Panel, Ui.Corner).border(2.dp, Ui.Line, Ui.Corner)
+                .pointerInput(Unit) { detectTapGestures { } }
+                .padding(horizontal = 22.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Label(q.prompt, 18.sp, align = TextAlign.Center)
+            Box(
+                Modifier.width(360.dp).background(Ui.Dark, Ui.Corner).border(2.dp, Ui.Accent, Ui.Corner)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                if (text.isEmpty()) Label("ここに入れる", 18.sp, color = Ui.Dim)
+                BasicTextField(
+                    value = text,
+                    onValueChange = {
+                        text = it.replace("\n", "")
+                        game.askNote = null
+                    },
+                    modifier = Modifier.width(332.dp).focusRequester(focus),
+                    textStyle = TextStyle(color = Ui.Text, fontSize = 18.sp, fontFamily = Ui.Hand),
+                    singleLine = true,
+                    cursorBrush = SolidColor(Ui.Accent),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (text.isNotBlank()) game.answer(text) }),
+                )
+            }
+            val note = game.askNote
+            if (note != null) Label(note, 15.sp, color = Ui.Accent)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PlainButton("やめる", 16.sp) { game.closeAsk() }
+                PlainButton("答える", 18.sp, enabled = text.isNotBlank(), strong = true) { game.answer(text) }
+            }
+        }
+    }
+    LaunchedEffect(q.id) { focus.requestFocus() }
 }
 
 @Composable
@@ -99,11 +203,36 @@ private fun SceneCanvas(game: GameApp, pack: Pack, view: ViewDef, modifier: Modi
     val paint = remember { Paint().apply { isAntiAlias = true; textAlign = Paint.Align.CENTER } }
     Canvas(
         modifier.pointerInput(view.id) {
-            detectTapGestures { p -> game.tap(p.x / size.width * 960f, p.y / size.height * 540f) }
+            // A touch that stays put is a tap. One that moves is a finger drawn across the scene: in the direction it
+            // went furthest, or, when it went back and forth (rubbing), in no direction.
+            awaitEachGesture {
+                val down = awaitFirstDown()
+                val start = down.position
+                var last = start
+                var travel = 0f
+                var moved = false
+                while (true) {
+                    val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                    travel += (c.position - last).getDistance()
+                    last = c.position
+                    if ((last - start).getDistance() > viewConfiguration.touchSlop) moved = true
+                    if (!c.pressed) break
+                }
+                val x = start.x / size.width * 960f
+                val y = start.y / size.height * 540f
+                val dx = last.x - start.x
+                val dy = last.y - start.y
+                val far = size.width * SWIPE_PART
+                when {
+                    !moved -> game.tap(x, y)
+                    max(abs(dx), abs(dy)) > far -> game.swipe(x, y, if (abs(dx) > abs(dy)) (if (dx > 0) 1 else 3) else (if (dy > 0) 2 else 0))
+                    travel > far * 2 -> game.swipe(x, y, -1)
+                }
+            }
         },
     ) {
         val k = size.width / 960f
-        val millis = System.currentTimeMillis() + tick * 0L
+        val millis = game.nowMillis() + tick * 0L
         val now = (millis / 1000).toInt()
 
         fun put(id: String?, x: Float, y: Float, w: Float, h: Float) {

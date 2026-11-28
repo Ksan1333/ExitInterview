@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.sp
 import com.ksan.exitinterview.app.GameApp
 import com.ksan.exitinterview.app.Overlay
 import com.ksan.exitinterview.app.Screen
+import com.ksan.exitinterview.app.episodeOf
+import com.ksan.exitinterview.app.isTestMode
 import com.ksan.exitinterview.engine.Rules
 import com.ksan.exitinterview.engine.ServerAddress
 
@@ -74,24 +76,40 @@ private fun onBack(game: GameApp) {
         }
         Screen.LOBBY -> game.leaveToTitle(true)
         Screen.ENDING -> Unit
-        Screen.MEET -> game.screen = if (game.meetMode == "test") Screen.TEST_MENU else Screen.TITLE
+        Screen.MEET -> game.screen = if (isTestMode(game.meetMode)) Screen.TEST_MENU else Screen.TITLE
         else -> game.screen = Screen.TITLE
     }
 }
 
 @Composable
 private fun TitleScreen(game: GameApp) {
+    val ep = game.currentEpisode
+    val many = game.episodes.size > 1
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Label("Exit Interview", 46.sp, color = Ui.Accent)
-        Label("出られたら合格", 15.sp, color = Ui.Dim)
+        if (many) {
+            // which story to play: "遊ぶ" and the test room follow this
+            val i = game.episodes.indexOfFirst { it.no == ep.no }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                PlainButton("＜", 16.sp, enabled = i > 0 && !game.busy) { game.chooseEpisode(game.episodes[i - 1].no) }
+                Column(Modifier.width(250.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Label(game.episodeTitle(ep), 20.sp)
+                    Label(game.episodeTagline(ep), 15.sp, color = Ui.Dim)
+                }
+                PlainButton("＞", 16.sp, enabled = i >= 0 && i < game.episodes.size - 1 && !game.busy) { game.chooseEpisode(game.episodes[i + 1].no) }
+            }
+        } else {
+            Label(game.episodeTagline(ep), 15.sp, color = Ui.Dim)
+        }
         Spacer(Modifier.height(6.dp))
         PlainButton("遊ぶ", 20.sp, Modifier.width(180.dp), enabled = !game.busy, strong = true) {
-            game.meetMode = "main"
+            game.meetMode = ep.mainMode
             game.screen = Screen.MEET
         }
         val saved = game.savedCode
         if (saved.isNotEmpty()) {
-            val label = if (ServerAddress.isPassphraseRoom(saved)) "続きから" else "続きから（$saved）"
+            val which = if (many) "（第${game.savedEpisode}話）" else ""
+            val label = if (ServerAddress.isPassphraseRoom(saved)) "続きから$which" else "続きから（$saved）"
             PlainButton(label, 16.sp, enabled = !game.busy) { game.joinRoom(saved) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -104,12 +122,13 @@ private fun TitleScreen(game: GameApp) {
 
 @Composable
 private fun TestMenu(game: GameApp) {
+    val ep = game.currentEpisode
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Label("テスト部屋", 26.sp, color = Ui.Accent)
-        PlainButton("1人で（通信なし）", 17.sp, enabled = !game.busy) { game.createRoom("test", true, true) }
-        PlainButton("1人で（サーバーを使う）", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom("test", true, false) }
+        Label(if (game.episodes.size > 1) "テスト部屋（${game.episodeTitle(ep)}）" else "テスト部屋", 26.sp, color = Ui.Accent)
+        PlainButton("1人で（通信なし）", 17.sp, enabled = !game.busy) { game.createRoom(ep.testMode, true, true) }
+        PlainButton("1人で（サーバーを使う）", 17.sp, enabled = !game.busy && game.hasServer()) { game.createRoom(ep.testMode, true, false) }
         PlainButton("2人で（合言葉でつなぐ）", 17.sp, enabled = !game.busy && game.hasServer()) {
-            game.meetMode = "test"
+            game.meetMode = ep.testMode
             game.screen = Screen.MEET
         }
         PlainButton("戻る", 15.sp) { game.screen = Screen.TITLE }
@@ -119,10 +138,11 @@ private fun TestMenu(game: GameApp) {
 @Composable
 private fun MeetScreen(game: GameApp) {
     var pass by remember { mutableStateOf("") }
-    val test = game.meetMode == "test"
+    val test = isTestMode(game.meetMode)
+    val which = if (game.episodes.size > 1) "（" + game.episodeTitle(episodeOf(game.meetMode)) + "）" else ""
     // 欄は上のほうに置く（キーボードが出ても隠れにくい）
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Label(if (test) "テスト部屋（2人で）" else "合言葉", 26.sp, color = Ui.Accent)
+        Label(if (test) "テスト部屋（2人で）" else "合言葉$which", 26.sp, color = Ui.Accent)
         Label("2人で同じ合言葉を入れると、同じ部屋につながります", 15.sp, color = Ui.Dim)
         Box(
             Modifier.width(320.dp).background(Ui.Dark, Ui.Corner).border(2.dp, Ui.Accent, Ui.Corner)
@@ -199,20 +219,24 @@ private fun CaptionOverlay(game: GameApp) {
 private fun EndingScreen(game: GameApp) {
     val def = game.pack?.stages?.get(game.state.f(Rules.STAGE))
     val sec = Rules.playSeconds(game.state, game.nowSec())
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (line in def?.credits ?: emptyList()) Label(line, 15.sp, color = Ui.Dim)
-        val letter = def?.letter ?: emptyList()
+    val letter = def?.letter ?: emptyList()
+    // the letter beside the rest, so that a letter of several lines still fits a phone held sideways
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(36.dp)) {
         if (letter.isNotEmpty()) {
             Column(
-                Modifier.padding(vertical = 6.dp).background(Ui.Text, Ui.Corner).border(2.dp, Ui.Ink, Ui.Corner).padding(horizontal = 28.dp, vertical = 14.dp),
+                Modifier.background(Ui.Text, Ui.Corner).border(2.dp, Ui.Ink, Ui.Corner).padding(horizontal = 28.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 for (line in letter) Label(line, 22.sp, color = Ui.Ink)
             }
         }
-        Label("かかった時間：${sec / 60}分${sec % 60}秒", 16.sp)
-        Label("ヒント：${game.state.f(Rules.N_HINT)}回　スキップ：${game.state.f(Rules.N_SKIP)}回", 16.sp)
-        Spacer(Modifier.height(4.dp))
-        PlainButton("タイトルへ", 16.sp) { game.leaveToTitle(true) }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (line in def?.credits ?: emptyList()) Label(line, 15.sp, color = Ui.Dim)
+            Spacer(Modifier.height(4.dp))
+            Label("かかった時間：${sec / 60}分${sec % 60}秒", 16.sp)
+            Label("ヒント：${game.state.f(Rules.N_HINT)}回　スキップ：${game.state.f(Rules.N_SKIP)}回", 16.sp)
+            Spacer(Modifier.height(4.dp))
+            PlainButton("タイトルへ", 16.sp) { game.leaveToTitle(true) }
+        }
     }
 }
