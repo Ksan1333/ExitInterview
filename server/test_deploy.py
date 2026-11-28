@@ -82,9 +82,10 @@ for tool, switch in (("zip", "EI_NOZIP"), ("node", "EI_NONODE")):
     os.chmod(os.path.join(bin_dir, tool), 0o755)
 HAVE_NODE = shutil.which("node") is not None
 
-# curl: the uploaded code answers, with the key that the deploy stored on the function. A bash script starts Python
-# on it, since Git for Windows cannot run a "#!C:\...\python.exe" line, and it asks the mock directly, since Python on
-# Windows cannot run the bash stand-in for aws.
+# curl: the uploaded code answers, with the key that the deploy stored on the function. A bash script starts Python on
+# it by its Windows path: Git for Windows hands a "#!...python.exe" script under /tmp (the temp folder) to Python as
+# C:\tmp\..., which does not exist. It asks the mock for the key itself: Python on Windows cannot start the bash
+# stand-in for aws (a file with no .exe or .cmd name).
 with open(os.path.join(bin_dir, "curl.py"), "w") as fh:
     fh.write("""import json, os, subprocess, sys, tempfile, urllib.parse, zipfile
 args = sys.argv[1:]
@@ -174,8 +175,7 @@ check(code == 0 and uploaded()[1].get("tree") == "" and "配置する版: 不明
 sh("git", "checkout", "-q", "--", "server", cwd=clone, env=ENV)
 
 script = open(os.path.join(HERE, "deploy.sh"), encoding="utf-8").read()
-# --norc: Git for Windows reads a bashrc for interactive shells that puts its own curl before the stand-ins
-code, out = sh("bash", "--norc", "-i", cwd=clone, env=ENV, stdin=script)
+code, out = sh("bash", "-i", cwd=clone, env=ENV, stdin=script)
 check(address(out) == first and uploaded()[1].get("tree") == "", "pasted into a shell it deploys too, as an unknown version")
 check(not any(x.startswith("KSANHUB_SITE_URL=") for x in out.splitlines()), "and leaves out the line meant for KsanHub")
 
