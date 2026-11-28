@@ -8,7 +8,9 @@ answer on the function's public URL, so `curl` is replaced by a stand-in that un
 just uploaded and runs that code with the key the script stored: what answers is the deployed function.
 Checked: a first deploy and a redeploy from a clone (how KsanHub runs it), from a clone with uncommitted
 changes, pasted into a shell, the way Windows behaves (no zip command, CR at line ends), with KsanHub's
-deploy key (which may not touch IAM), and after remove.sh.
+deploy key (which may not touch IAM), and after remove.sh. Also that the server goes to Tokyo whatever region the
+environment names, and a move: a second server in another region is removed without touching the one in Tokyo or
+the IAM role both use. Runs on Linux and in Git for Windows.
 Skipped when moto (with its server) or the aws command line is missing.
 """
 import json
@@ -43,9 +45,10 @@ def check(ok, what):
 
 
 def sh(*args, cwd=None, env=None, stdin=None):
-    # utf-8 with replacement: on Windows the aws command line may print in the local code page (cp932)
-    r = subprocess.run(list(args), cwd=cwd, env=env, input=stdin, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    return r.returncode, r.stdout + r.stderr
+    # bytes in: on Windows, text mode would send a pasted script with CR LF line ends.
+    # utf-8 with replacement out: on Windows the aws command line may print in the local code page (cp932)
+    r = subprocess.run(list(args), cwd=cwd, env=env, input=None if stdin is None else stdin.encode("utf-8"), capture_output=True)
+    return r.returncode, (r.stdout + r.stderr).decode("utf-8", errors="replace")
 
 
 with socket.socket() as probe:
@@ -79,17 +82,18 @@ for tool, switch in (("zip", "EI_NOZIP"), ("node", "EI_NONODE")):
     os.chmod(os.path.join(bin_dir, tool), 0o755)
 HAVE_NODE = shutil.which("node") is not None
 
-# curl: the uploaded code answers, with the key that the deploy stored on the function.
-with open(os.path.join(bin_dir, "curl"), "w") as fh:
-    fh.write("""#!%s
-import json, os, subprocess, sys, tempfile, urllib.parse, zipfile
+# curl: the uploaded code answers, with the key that the deploy stored on the function. A bash script starts Python
+# on it, since Git for Windows cannot run a "#!C:\...\python.exe" line, and it asks the mock directly, since Python on
+# Windows cannot run the bash stand-in for aws.
+with open(os.path.join(bin_dir, "curl.py"), "w") as fh:
+    fh.write("""import json, os, subprocess, sys, tempfile, urllib.parse, zipfile
 args = sys.argv[1:]
 url = next(a for a in args if a.startswith("http"))
 body = args[args.index("-d") + 1] if "-d" in args else None
 where = tempfile.mkdtemp()
 zipfile.ZipFile(os.environ["EI_CAPTURE"]).extractall(where)
 os.environ["EI_KEY"] = subprocess.run(
-    ["aws", "lambda", "get-function-configuration", "--function-name", "exit-interview-rooms",
+    [%r, "--endpoint-url", %r, "lambda", "get-function-configuration", "--function-name", "exit-interview-rooms",
      "--query", "Environment.Variables.EI_KEY", "--output", "text"], capture_output=True, text=True).stdout.strip()
 sys.path.insert(0, where)
 import lambda_function as room
@@ -97,7 +101,9 @@ if body is None:
     print(json.dumps(room.info(urllib.parse.urlparse(url).path)))
 else:
     print(json.dumps(room.handle(json.loads(body), room.MemStore())))
-""" % sys.executable)
+""" % (REAL_AWS, ENDPOINT))
+with open(os.path.join(bin_dir, "curl"), "w") as fh:
+    fh.write('#!/usr/bin/env bash\nexec "%s" "%s" "$@"\n' % (sys.executable.replace("\\", "/"), os.path.join(bin_dir, "curl.py").replace("\\", "/")))
 # sleep: the waits are for real AWS to catch up; the mock is ready at once.
 with open(os.path.join(bin_dir, "sleep"), "w") as fh:
     fh.write("#!/bin/sh\nexit 0\n")
@@ -121,6 +127,17 @@ def address(out):
     return lines[-1] if lines else ""
 
 
+def mock(*args, region="ap-northeast-1"):
+    """Asks the mock directly (Python on Windows cannot run the bash stand-in for aws)."""
+    return sh(REAL_AWS, "--endpoint-url", ENDPOINT, *args, env=dict(ENV, AWS_REGION=region, AWS_DEFAULT_REGION=region))
+
+
+def exists(what, region="ap-northeast-1"):
+    return mock(*{"function": ("lambda", "get-function", "--function-name", "exit-interview-rooms"),
+                  "table": ("dynamodb", "describe-table", "--table-name", "ExitInterviewRooms"),
+                  "role": ("iam", "get-role", "--role-name", "exit-interview-lambda")}[what], region=region)[0] == 0
+
+
 # A clone with the files as they are now, committed: what KsanHub's build checks out.
 clone = os.path.join(work, "clone")
 os.makedirs(os.path.join(clone, "server"))
@@ -140,7 +157,11 @@ names, build = uploaded()
 check(names == ["build.json", "lambda_function.py"], "the upload holds the code and build.json")
 check(len(tree) == 40 and build.get("tree") == tree, "build.json names the committed server folder")
 check(len(build.get("deployedAt", "")) == 20 and build["deployedAt"].endswith("Z"), "build.json carries the time of the deploy")
-check("リージョン: ap-southeast-2" in out, "the region comes from the environment")
+check("リージョン: ap-northeast-1" in out and exists("function") and exists("table") and not exists("function", "ap-southeast-2"),
+      "the server goes to Tokyo, though the environment names Sydney (as CloudShell, KsanHub and CodeBuild may)")
+policy = mock("iam", "get-role-policy", "--role-name", "exit-interview-lambda", "--policy-name", "rooms-table")[1]
+check("arn:aws:dynamodb:*:" in policy and "table/ExitInterviewRooms" in policy,
+      "the role may use the table in any region (one role for all regions: the old place keeps working during a move)")
 
 code, out = sh("bash", os.path.join(clone, "server", "deploy.sh"), cwd=work, env=ENV)
 check(code == 0 and address(out) == first, "a second deploy (called by its full path, from elsewhere) keeps the URL and the key")
@@ -153,7 +174,8 @@ check(code == 0 and uploaded()[1].get("tree") == "" and "配置する版: 不明
 sh("git", "checkout", "-q", "--", "server", cwd=clone, env=ENV)
 
 script = open(os.path.join(HERE, "deploy.sh"), encoding="utf-8").read()
-code, out = sh("bash", "-i", cwd=clone, env=ENV, stdin=script)
+# --norc: Git for Windows reads a bashrc for interactive shells that puts its own curl before the stand-ins
+code, out = sh("bash", "--norc", "-i", cwd=clone, env=ENV, stdin=script)
 check(address(out) == first and uploaded()[1].get("tree") == "", "pasted into a shell it deploys too, as an unknown version")
 check(not any(x.startswith("KSANHUB_SITE_URL=") for x in out.splitlines()), "and leaves out the line meant for KsanHub")
 
@@ -179,10 +201,19 @@ check(code == 0 and address(out) == first and "IAM を扱えません" in out an
 code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="lambda update-function-code"))
 check(code != 0 and not any(x.startswith("KSANHUB_SITE_URL=") for x in out.splitlines()) and "できました" not in out, "a refused upload fails the deploy")
 
+# a move: the server left in the old region goes away, while the one in Tokyo and the role they share stay
+code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REGION="ap-southeast-2"))
+old = address(out)
+check(code == 0 and "リージョン: ap-southeast-2" in out and old != "" and old != first and exists("function", "ap-southeast-2"),
+      "EI_REGION puts a second server in another region, with its own URL")
+code, out = sh("bash", "server/remove.sh", cwd=clone, env=dict(ENV, EI_REGION="ap-southeast-2"))
+check("消しました" in out and "残しました" in out and not exists("function", "ap-southeast-2") and not exists("table", "ap-southeast-2")
+      and exists("function") and exists("table") and exists("role"), "removing the old region leaves the server in Tokyo and the shared role")
+code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="iam *"))
+check(code == 0 and address(out) == first, "and the server in Tokyo still deploys with KsanHub's key, at the same URL")
 code, out = sh("bash", "server/remove.sh", cwd=clone, env=ENV)
-check("消しました" in out and sh("aws", "lambda", "get-function", "--function-name", "exit-interview-rooms", env=ENV)[0] != 0
-      and sh("aws", "dynamodb", "describe-table", "--table-name", "ExitInterviewRooms", env=ENV)[0] != 0
-      and sh("aws", "iam", "get-role", "--role-name", "exit-interview-lambda", env=ENV)[0] != 0, "remove.sh takes everything away")
+check("消しました" in out and "リージョン: ap-northeast-1" in out and not exists("function") and not exists("table") and not exists("role"),
+      "remove.sh takes everything away (in Tokyo, though the environment names Sydney)")
 code, out = sh("bash", "server/deploy.sh", cwd=clone, env=dict(ENV, EI_REFUSE="iam *"))
 check(code != 0 and "初めての配置だけ" in out and "できました" not in out and not any(x.startswith("KSANHUB_SITE_URL=") for x in out.splitlines()),
       "KsanHub's key cannot make the first deploy, and says what to do instead")

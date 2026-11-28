@@ -20,7 +20,7 @@
 | 部分 | 技術 |
 | --- | --- |
 | アプリ | Kotlin 2.0.21、Jetpack Compose、minSdk 26（Android 8.0）、横画面 |
-| サーバー | AWS Lambda（関数URL）＋ DynamoDB、ap-southeast-2 |
+| サーバー | AWS Lambda（関数URL）＋ DynamoDB、ap-northeast-1（東京。2026-11-28 にシドニーから移した） |
 | 同期 | どちらかが操作している間は0.5秒ごと、静かなときは1秒ごとの問い合わせ（接続は使い回す）。操作は手元ですぐ反映し、すぐサーバーへ送る |
 
 ## ビルド（Android Studio）
@@ -60,7 +60,7 @@ KsanHub の「Exit Interview」は、このリポジトリの最新の Release �
 3. リポジトリの直下に `server-base.txt` を置く（`.gitignore` 済み）。中身はサーバーのアドレスの 1 行だけで、鍵（`/k/` の後ろ）は書かない（書いてあるとビルドが止まる）。APK に入り、遊ぶ人はサーバーの設定をしなくてよくなる。
 
    ```
-   https://<関数URLのホスト>.lambda-url.ap-southeast-2.on.aws/
+   https://<関数URLのホスト>.lambda-url.ap-northeast-1.on.aws/
    ```
 
 4. APK を作る。`dist\ExitInterview-<版>.apk` ができる（`server-base.txt` がないと止まる）。
@@ -89,6 +89,8 @@ python3 tools/make_icon.py --ksanhub <scoop-bucket の icons フォルダ>
 
 配置には [`server/deploy.sh`](server/deploy.sh) を使います。何度実行しても同じ結果になります（2回目からは関数の中身だけ入れ替えます）。
 
+置く場所は東京（ap-northeast-1）です。CloudShell・KsanHub・スマホの CodeBuild が決めているリージョンには従わず、いつも東京に置きます（ほかに置くときだけ、先に `export EI_REGION=<リージョン>`）。IAM ロール `exit-interview-lambda` はどのリージョンでも同じ 1 つで、どのリージョンのテーブルも使えます。
+
 | 置き方 | 初めての配置 | 2回目から | 配置した版の記録 |
 | --- | --- | --- | --- |
 | KsanHub の「AWS に配置」（PC・スマホ） | できない | できる | 残る（KsanHub に「配置済み・最新」と出る） |
@@ -110,6 +112,17 @@ python3 tools/make_icon.py --ksanhub <scoop-bucket の icons フォルダ>
 
 KsanHub の一覧（`Ksan1333/scoop-bucket` の `catalog.json`）では、サーバーが `exitinterview-server`（配置スクリプトは `server/deploy.sh`、判定に使うフォルダは `server`）、ゲーム本体が `exitinterview`（この Release の APK を入れる）です。
 
+### 東京へ移す（2026-11-28 から）
+
+シドニー（ap-southeast-2）から東京へ移すと、1 回の通信が約 0.27 秒から 0.04〜0.08 秒になります（この PC から測った値）。関数の URL は変わるので、新しいアドレスの APK が要ります。
+
+1. KsanHub の「Exit Interview（部屋サーバー）」で「CloudShell で配置」を押し、コピーされたコマンドを CloudShell に貼り付ける（東京では初めての配置なので、KsanHub の「AWS に配置」ではできない）。最後に「リージョン: ap-northeast-1」と新しい URL が出る。
+2. 続けて KsanHub の「AWS に配置」を 1 回押す（中身は同じ。KsanHub が東京の URL を覚え、「配置済み・最新」の判定が東京を見るようになる）。
+3. 新しいアドレス（`/k/` の前まで）を `server-base.txt`（控えは `Documents\Claude\.exitinterview\server-base.txt`）に書き、次の版の APK を作る（Release）。
+4. 2人とも新しい APK に入れ替えたら、シドニーに残ったものを消す。CloudShell で `export EI_REGION=ap-southeast-2` を実行してから、`server/remove.sh` の中身を貼り付ける。東京のサーバーと共通の IAM ロールは残る。
+
+シドニーのものを消すまでは、前の APK（0.1.3 まで）もシドニーで遊べます（部屋は東京と別）。
+
 ### 合言葉でつなぐ（0.1.3 から）
 
 配布用の APK にはサーバーのアドレス（鍵なし）が入っています。遊ぶ人の設定は要りません。「遊ぶ」で2人が同じ合言葉を入れると、同じ部屋につながります。
@@ -125,7 +138,7 @@ KsanHub の一覧（`Ksan1333/scoop-bucket` の `catalog.json`）では、サー
 - アプリで入れる：URL をコピー → アプリの「設定」→「クリップボードから貼り付け」。貼り付けた URL は、アプリに入っているサーバーより優先します（「元に戻す」で戻る）。
 - APK に入れる：`app/src/main/assets/server.txt` にその1行を書いてビルドする。ただしこのリポジトリは公開なので、書いた `server.txt` はコミットしないでください。
 
-消すときは [`server/remove.sh`](server/remove.sh) を CloudShell に貼り付けます。
+消すときは [`server/remove.sh`](server/remove.sh) を CloudShell に貼り付けます。消えるのは東京のものです（ほかのリージョンのものは、先に `export EI_REGION=<リージョン>`）。ほかのリージョンに関数が残っていれば、共通の IAM ロールは消しません。
 
 ### 手元のPCで動かす（予備）
 
@@ -172,7 +185,7 @@ Python 3 の名前が `python3` でない PC（Windows など）では `PYTHON=p
 | ステージ | 2つの話それぞれの、模範解答の通し、全問のスキップ、行き止まりの探索、間違えたときの動き、合否の決まり方（第2話）。配布するステージ（`stage.pack`・`stage2.pack`）が今の定義から作ったものか（上書きはしない） |
 | 同期 | 2人が同時に操作しても取りこぼさないこと（メモリ内と HTTP 経由） |
 | サーバー | メモリ版と DynamoDB のモックに対する動作。`build.json` の返し方 |
-| 配置 | `server/deploy.sh` と `server/remove.sh` を、AWS のモック（moto）に対して最初から最後まで実行する（クローンから・貼り付け・Windows と同じ条件・KsanHub の配置用の鍵と同じ権限・消してからの再配置）。本物の AWS では確かめていない |
+| 配置 | `server/deploy.sh` と `server/remove.sh` を、AWS のモック（moto）に対して最初から最後まで実行する（クローンから・貼り付け・Windows と同じ条件・KsanHub の配置用の鍵と同じ権限・消してからの再配置・環境が別のリージョンでも東京に置くこと・移したあとに前のリージョンのものだけを消すこと）。Linux と Git for Windows のどちらでも動く。本物の AWS では確かめていない |
 | サーバーの URL | アプリが URL と鍵を正しく読み分けること |
 | アプリ | Android と Compose の代用品に対する型検査（実ビルドの代わりにはならない） |
 

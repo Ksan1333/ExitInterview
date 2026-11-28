@@ -23,11 +23,11 @@ SCRIPT = r'''#!/usr/bin/env bash
 # 作るもの: DynamoDB テーブル 1つ / IAM ロール 1つ / Lambda 関数 1つ（関数URLつき）。
 # 何度実行しても同じ結果になります（2回目からは関数の中身だけ入れ替えます）。
 # 初めての配置は 2 で行います。KsanHub の配置用の鍵は IAM ロールを作れないためです（2回目からは 1 でできます）。
+# 置く場所は東京（ap-northeast-1）です（2026-11-28 にシドニーから移しました）。CloudShell・KsanHub・CodeBuild が
+# 決めているリージョンには従いません。ほかに置くときだけ、先に EI_REGION=<リージョン> を決めます。
 # このファイルは server/make_deploy.py が作ります。手で書き換えないでください。
 ei_deploy() (
-  REGION="${EI_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-}}}"
-  [ -n "$REGION" ] || REGION=$(aws configure get region 2>/dev/null)
-  export AWS_REGION="${REGION:-ap-southeast-2}" AWS_PAGER=""
+  export AWS_REGION="${EI_REGION:-ap-northeast-1}" AWS_PAGER=""
   export AWS_DEFAULT_REGION="$AWS_REGION"
   # Windows（Git for Windows の bash）で動くときのため: 引数をパスと見なして書き換えさせない。AWS CLI が行末に付ける CR は取り除く。
   export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*"
@@ -69,10 +69,11 @@ ei_deploy() (
 
   say "2/6 実行ロール"
   # ロールが要るのは関数を作るときだけ。KsanHub の配置用の鍵は IAM を扱えないので、関数がすでにあれば今のロールのまま進む。
+  # ロールはどのリージョンでも同じ 1 つなので、どのリージョンのテーブルも読み書きできるようにする（移すあいだ、前の場所も動く）。
   set_role() {
     aws iam attach-role-policy --role-name "$ROLE" --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole \
     && aws iam put-role-policy --role-name "$ROLE" --policy-name rooms-table --policy-document \
-    "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":\"arn:aws:dynamodb:$AWS_REGION:$ACC:table/$TABLE\"}]}"
+    "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":\"arn:aws:dynamodb:*:$ACC:table/$TABLE\"}]}"
   }
   if aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
     set_role 2>/dev/null || { [ "$HAVEFN" = 1 ] || { set_role; return 1; }; echo "（この鍵ではロールの権限を書き直せません。今の設定のまま続けます）"; }
@@ -81,7 +82,7 @@ ei_deploy() (
   else
     aws iam create-role --role-name "$ROLE" --assume-role-policy-document \
       '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null || {
-      echo "IAM ロールを作れませんでした。KsanHub の配置用の鍵では、初めての配置はできません。"
+      echo "IAM ロールを作れませんでした。KsanHub の配置用の鍵では、初めての配置（このリージョンにまだ関数がないとき）はできません。"
       echo "初めての配置だけ、KsanHub の「CloudShell で配置」か、CloudShell への貼り付けで行ってください。"
       return 1
     }
@@ -95,10 +96,12 @@ ei_deploy() (
   printf '%s' '@@CODE@@' | base64 -d | gunzip > "$W/lambda_function.py" || return 1
   printf '{"tree":"%s","deployedAt":"%s"}\n' "$TREE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.json"
   cd "$W" || return 1
-  # zip がない環境（Windows）では Node.js で、それもなければ Python でまとめる。
+  # zip がない環境（Windows）では Node.js で、それもなければ Python でまとめる（Windows の Python は python3 という名前がないことがある）。
+  PYZIP='import zipfile; z = zipfile.ZipFile("fn.zip", "w", zipfile.ZIP_DEFLATED); z.write("lambda_function.py"); z.write("build.json"); z.close()'
   zip -q fn.zip lambda_function.py build.json 2>/dev/null \
     || node -e '@@NODEZIP@@' 2>/dev/null \
-    || python3 -c 'import zipfile; z = zipfile.ZipFile("fn.zip", "w", zipfile.ZIP_DEFLATED); z.write("lambda_function.py"); z.write("build.json"); z.close()' 2>/dev/null \
+    || python3 -c "$PYZIP" 2>/dev/null \
+    || python -c "$PYZIP" 2>/dev/null \
     || { echo "zip・Node.js・Python のどれも使えないため、コードをまとめられませんでした。"; return 1; }
   [ -n "$TREE" ] && echo "配置する版: ${TREE:0:12}" || echo "配置する版: 不明（貼り付けて実行したか、server フォルダに未コミットの変更があります）"
 

@@ -6,11 +6,11 @@
 # 作るもの: DynamoDB テーブル 1つ / IAM ロール 1つ / Lambda 関数 1つ（関数URLつき）。
 # 何度実行しても同じ結果になります（2回目からは関数の中身だけ入れ替えます）。
 # 初めての配置は 2 で行います。KsanHub の配置用の鍵は IAM ロールを作れないためです（2回目からは 1 でできます）。
+# 置く場所は東京（ap-northeast-1）です（2026-11-28 にシドニーから移しました）。CloudShell・KsanHub・CodeBuild が
+# 決めているリージョンには従いません。ほかに置くときだけ、先に EI_REGION=<リージョン> を決めます。
 # このファイルは server/make_deploy.py が作ります。手で書き換えないでください。
 ei_deploy() (
-  REGION="${EI_REGION:-${AWS_REGION:-${AWS_DEFAULT_REGION:-}}}"
-  [ -n "$REGION" ] || REGION=$(aws configure get region 2>/dev/null)
-  export AWS_REGION="${REGION:-ap-southeast-2}" AWS_PAGER=""
+  export AWS_REGION="${EI_REGION:-ap-northeast-1}" AWS_PAGER=""
   export AWS_DEFAULT_REGION="$AWS_REGION"
   # Windows（Git for Windows の bash）で動くときのため: 引数をパスと見なして書き換えさせない。AWS CLI が行末に付ける CR は取り除く。
   export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*"
@@ -52,10 +52,11 @@ ei_deploy() (
 
   say "2/6 実行ロール"
   # ロールが要るのは関数を作るときだけ。KsanHub の配置用の鍵は IAM を扱えないので、関数がすでにあれば今のロールのまま進む。
+  # ロールはどのリージョンでも同じ 1 つなので、どのリージョンのテーブルも読み書きできるようにする（移すあいだ、前の場所も動く）。
   set_role() {
     aws iam attach-role-policy --role-name "$ROLE" --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole \
     && aws iam put-role-policy --role-name "$ROLE" --policy-name rooms-table --policy-document \
-    "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":\"arn:aws:dynamodb:$AWS_REGION:$ACC:table/$TABLE\"}]}"
+    "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:UpdateItem\"],\"Resource\":\"arn:aws:dynamodb:*:$ACC:table/$TABLE\"}]}"
   }
   if aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
     set_role 2>/dev/null || { [ "$HAVEFN" = 1 ] || { set_role; return 1; }; echo "（この鍵ではロールの権限を書き直せません。今の設定のまま続けます）"; }
@@ -64,7 +65,7 @@ ei_deploy() (
   else
     aws iam create-role --role-name "$ROLE" --assume-role-policy-document \
       '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' >/dev/null || {
-      echo "IAM ロールを作れませんでした。KsanHub の配置用の鍵では、初めての配置はできません。"
+      echo "IAM ロールを作れませんでした。KsanHub の配置用の鍵では、初めての配置（このリージョンにまだ関数がないとき）はできません。"
       echo "初めての配置だけ、KsanHub の「CloudShell で配置」か、CloudShell への貼り付けで行ってください。"
       return 1
     }
@@ -78,10 +79,12 @@ ei_deploy() (
   printf '%s' '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' | base64 -d | gunzip > "$W/lambda_function.py" || return 1
   printf '{"tree":"%s","deployedAt":"%s"}\n' "$TREE" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$W/build.json"
   cd "$W" || return 1
-  # zip がない環境（Windows）では Node.js で、それもなければ Python でまとめる。
+  # zip がない環境（Windows）では Node.js で、それもなければ Python でまとめる（Windows の Python は python3 という名前がないことがある）。
+  PYZIP='import zipfile; z = zipfile.ZipFile("fn.zip", "w", zipfile.ZIP_DEFLATED); z.write("lambda_function.py"); z.write("build.json"); z.close()'
   zip -q fn.zip lambda_function.py build.json 2>/dev/null \
     || node -e 'const fs=require("fs"),zl=require("zlib"),t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}const crc=b=>{let c=0xFFFFFFFF;for(const x of b)c=t[(c^x)&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0};const loc=[],cen=[];let off=0;for(const name of["lambda_function.py","build.json"]){const d=fs.readFileSync(name),c=zl.deflateRawSync(d),nm=Buffer.from(name),h=Buffer.alloc(30),e=Buffer.alloc(46);h.writeUInt32LE(0x04034b50,0);h.writeUInt16LE(20,4);h.writeUInt16LE(8,8);h.writeUInt16LE(0x21,12);h.writeUInt32LE(crc(d),14);h.writeUInt32LE(c.length,18);h.writeUInt32LE(d.length,22);h.writeUInt16LE(nm.length,26);e.writeUInt32LE(0x02014b50,0);e.writeUInt16LE(0x0314,4);e.writeUInt16LE(20,6);e.writeUInt16LE(8,10);e.writeUInt16LE(0x21,14);e.writeUInt32LE(crc(d),16);e.writeUInt32LE(c.length,20);e.writeUInt32LE(d.length,24);e.writeUInt16LE(nm.length,28);e.writeUInt32LE(0x81A40000,38);e.writeUInt32LE(off,42);loc.push(h,nm,c);cen.push(e,nm);off+=30+nm.length+c.length}const cd=Buffer.concat(cen),end=Buffer.alloc(22);end.writeUInt32LE(0x06054b50,0);end.writeUInt16LE(2,8);end.writeUInt16LE(2,10);end.writeUInt32LE(cd.length,12);end.writeUInt32LE(off,16);fs.writeFileSync("fn.zip",Buffer.concat([...loc,cd,end]))' 2>/dev/null \
-    || python3 -c 'import zipfile; z = zipfile.ZipFile("fn.zip", "w", zipfile.ZIP_DEFLATED); z.write("lambda_function.py"); z.write("build.json"); z.close()' 2>/dev/null \
+    || python3 -c "$PYZIP" 2>/dev/null \
+    || python -c "$PYZIP" 2>/dev/null \
     || { echo "zip・Node.js・Python のどれも使えないため、コードをまとめられませんでした。"; return 1; }
   [ -n "$TREE" ] && echo "配置する版: ${TREE:0:12}" || echo "配置する版: 不明（貼り付けて実行したか、server フォルダに未コミットの変更があります）"
 
