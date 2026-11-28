@@ -1,7 +1,9 @@
-"""Hand-drawn look: wobbly ink outlines over flat fills, rendered to pictures with rsvg-convert."""
+"""Hand-drawn look: wobbly ink outlines over flat fills, rendered to pictures with rsvg-convert (or resvg)."""
 import io
 import math
+import os
 import random
+import shutil
 import subprocess
 
 from PIL import Image
@@ -9,6 +11,8 @@ from PIL import Image
 W, H = 960, 540
 SCALE = 2
 FONT = "Yomogi"
+# the font file the app uses; resvg reads it directly (rsvg-convert finds the installed font by name)
+FONT_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "app", "src", "main", "res", "font", "yomogi_regular.ttf"))
 TEXT_LOG = []  # every string drawn, so the build can check that the font has all the letters
 
 INK = "#101316"
@@ -270,9 +274,27 @@ def svg_doc(elems, x=0, y=0, w=W, h=H, bg=None, scale=SCALE):
     return head + back + "".join(elems) + "</svg>"
 
 
+def renderer():
+    """The SVG renderer to use: rsvg-convert where it is installed (Linux), else resvg.
+    EI_RESVG=<path to resvg> picks resvg even when rsvg-convert is there. The two draw text a little differently,
+    so a pack is reproducible only with the same renderer."""
+    forced = os.environ.get("EI_RESVG")
+    if not forced and shutil.which("rsvg-convert"):
+        return "rsvg"
+    if forced or shutil.which("resvg"):
+        return "resvg"
+    raise RuntimeError("no SVG renderer: install rsvg-convert, or set EI_RESVG to the path of resvg")
+
+
+def _cmd():
+    if renderer() == "rsvg":
+        return ["rsvg-convert", "-f", "png"]
+    return [os.environ.get("EI_RESVG") or shutil.which("resvg"), "--skip-system-fonts", "--use-font-file", FONT_FILE, "-", "-c"]
+
+
 def render(elems, x=0, y=0, w=W, h=H, bg=None, scale=SCALE):
     """Returns a PIL image of the given region."""
-    p = subprocess.run(["rsvg-convert", "-f", "png"], input=svg_doc(elems, x, y, w, h, bg, scale).encode("utf-8"),
+    p = subprocess.run(_cmd(), input=svg_doc(elems, x, y, w, h, bg, scale).encode("utf-8"),
                        capture_output=True, check=True)
     return Image.open(io.BytesIO(p.stdout))
 

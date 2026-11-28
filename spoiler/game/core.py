@@ -18,6 +18,9 @@ MAZES = {}
 STAGES = {}
 INIT = {"f": {}, "i": {}}
 START = {"main": 1, "test": 9}
+META = {}  # episode 2 on: {"title": ..., "tagline": ...} for the title screen
+ASKS = {}  # episode 2 on: questions answered by typing
+COMBOS = []  # episode 2 on: two held things that go together
 KEY_TEXT = "exit-interview/kotatsu#2026"
 
 
@@ -51,10 +54,14 @@ class View:
     def sprite(self, img, w, h, flag, positions, when=None):
         self.order.append(("sprite", img, w, h, flag, positions, when))
 
-    def spot(self, rect, ops, when=None):
+    def spot(self, rect, ops, when=None, swipe=None):
+        """A place that reacts to a tap, or with swipe (0 up, 1 right, 2 down, 3 left, 4 any: rubbing) only to a
+        finger drawn across it."""
         d = dict(r=[round(v, 1) for v in rect], ops=ops)
         if when is not None:
             d["when"] = when
+        if swipe is not None:
+            d["sw"] = swipe
         self.spots.append(d)
 
     def text(self, x, y, size, flag, kind="num", color=INK, map=None, when=None):
@@ -66,8 +73,27 @@ class View:
         self.texts.append(d)
 
 
-def item(iid, draw):
-    ITEMS[iid] = draw
+def item(iid, draw, name=None, desc=None, zoom=None, back=None, zsize=(480, 360)):
+    """A thing to hold; draw paints it in a 96x96 box. Episode 2 on: a name and lines of text shown when it is picked,
+    zoom (drawn in a zsize box) shown when it is looked at closely, and back, its other side (also zsize). A named
+    thing without zoom is shown large from its own drawing."""
+    ITEMS[iid] = dict(draw=draw, name=name, desc=list(desc or []), zoom=zoom, back=back, zsize=tuple(zsize))
+
+
+def ask(aid, prompt, answers, ok, ng=None, when=None):
+    """A question answered by typing. Open it with ["ask", aid]. when must stop holding once it is answered."""
+    if when is None:
+        raise ValueError("ask %s needs a when that closes it once answered" % aid)
+    ASKS[aid] = dict(q=prompt, ans=list(answers), when=when, ok=ok,
+                     ng=ng if ng is not None else [["sfx", "buzz"], ["shake"], ["msg", "ちがうみたい"]])
+
+
+def combo(a, b, ops, when=None):
+    """Picking a and tapping b (or the other way round) runs ops."""
+    d = dict(a=a, b=b, ops=ops)
+    if when is not None:
+        d["when"] = when
+    COMBOS.append(d)
 
 
 def sprite(sid, w, h, draw):
@@ -106,7 +132,7 @@ def _walk_cond(c, flags, items_used):
     if not isinstance(c, list) or not c:
         return
     op = c[0]
-    if op in ("eq", "ne", "ge", "le", "gt", "lt", "cool"):
+    if op in ("eq", "ne", "ge", "le", "gt", "lt", "cool", "within"):
         flags.add(c[1])
     elif op in ("has", "sel"):
         items_used.add(c[1])
@@ -148,6 +174,12 @@ def _walk_ops(ops, set_flags, used_flags, items_used, views_used):
                 raise ValueError("unknown stage %r" % o[1])
         elif op in ("sfx", "shake", "unsel"):
             pass
+        elif op == "msg":
+            if not isinstance(o[1], str) or not o[1]:
+                raise ValueError("msg needs a line: %r" % (o,))
+        elif op == "ask":
+            if o[1] not in ASKS:
+                raise ValueError("unknown ask %r" % (o[1],))
         else:
             raise ValueError("unknown op %r" % (o,))
 
@@ -193,6 +225,21 @@ def check():
         _walk_ops(p["skip"], set_flags, used_flags, items_used, views_used)
         if len(p["hints"]) != 3:
             raise ValueError("puzzle %s needs 3 hints" % p["id"])
+    for q in ASKS.values():
+        _walk_cond(q["when"], used_flags, items_used)
+        _walk_ops(q["ok"], set_flags, used_flags, items_used, views_used)
+        _walk_ops(q["ng"], set_flags, used_flags, items_used, views_used)
+        if not q["ans"]:
+            raise ValueError("an ask needs an answer")
+    for c in COMBOS:
+        items_used.add(c["a"])
+        items_used.add(c["b"])
+        _walk_cond(c.get("when"), used_flags, items_used)
+        _walk_ops(c["ops"], set_flags, used_flags, items_used, views_used)
+    for v in VIEWS.values():
+        for sp in v.spots:
+            if sp.get("sw") not in (None, 0, 1, 2, 3, 4):
+                raise ValueError("%s: bad swipe %r" % (v.id, sp.get("sw")))
     for st in STAGES.values():
         if st.get("start"):
             views_used.add(st["start"])
@@ -205,11 +252,26 @@ def check():
     never_set = sorted(f for f in used_flags if f not in set_flags and not f.startswith("h_"))
     if never_set:
         raise ValueError("flags read but never set: %s" % never_set)
+    for o in _flat_ops(_all_ops()):
+        if o[0] == "sfx" and o[1] not in SFX:
+            raise ValueError("unknown sfx " + o[1])
+
+
+def _all_ops():
+    """Every op list of the episode, as one list."""
+    out = []
     for v in VIEWS.values():
         for sp in v.spots:
-            for o in _flat_ops(sp["ops"]):
-                if o[0] == "sfx" and o[1] not in SFX:
-                    raise ValueError("unknown sfx " + o[1])
+            out += sp["ops"]
+    for m in MAZES.values():
+        out += m["ok"]
+    for p in PUZZLES:
+        out += p["skip"]
+    for q in ASKS.values():
+        out += q["ok"] + q["ng"]
+    for c in COMBOS:
+        out += c["ops"]
+    return out
 
 
 def _flat_ops(ops):
@@ -247,7 +309,7 @@ def _sheet(v, base_im, layers, preview_dir):
             on.paste(pim.convert("RGB").resize((int(round(w)), int(round(h)))), (int(round(x)), int(round(y))))
     dr = ImageDraw.Draw(on)
     for t in v.texts:
-        font = ImageFont.truetype("/root/.fonts/Yomogi-Regular.ttf", int(t["sz"]))
+        font = ImageFont.truetype(hand.FONT_FILE, int(t["sz"]))
         dr.text((t["p"][0], t["p"][1]), "8", font=font, fill=t["c"], anchor="mm")
     for sp in v.spots:
         x, y, w, h = sp["r"]
@@ -266,15 +328,24 @@ def check_font():
     except ImportError:
         print("note: fontTools is missing, letters were not checked against the font")
         return
-    path = subprocess.run(["fc-match", "-f", "%{file}", hand.FONT], capture_output=True, text=True).stdout
-    if hand.FONT.lower() not in os.path.basename(path).lower():
-        raise ValueError("font %s is not installed (fc-match gave %s)" % (hand.FONT, path))
+    if hand.renderer() == "rsvg":
+        path = subprocess.run(["fc-match", "-f", "%{file}", hand.FONT], capture_output=True, text=True).stdout
+        if hand.FONT.lower() not in os.path.basename(path).lower():
+            raise ValueError("font %s is not installed (fc-match gave %s)" % (hand.FONT, path))
+    else:
+        path = hand.FONT_FILE  # resvg is given the app's own font file
     cmap = TTFont(path).getBestCmap()
     texts = list(hand.TEXT_LOG) + [v.name for v in VIEWS.values()]
     for p in PUZZLES:
         texts += [p["name"], p["ans"]] + p["hints"]
     for st in STAGES.values():
         texts += st.get("cap", []) + st.get("credits", []) + st.get("letter", [])
+    for it in ITEMS.values():
+        texts += [it["name"] or ""] + it["desc"]
+    for q in ASKS.values():
+        texts.append(q["q"])
+    texts += [o[1] for o in _flat_ops(_all_ops()) if o[0] == "msg"]
+    texts += [str(v) for v in META.values()]
     missing = sorted({c for t in texts for c in t if ord(c) > 32 and c != "\u3000" and ord(c) not in cmap})
     if missing:
         raise ValueError("letters missing from the font: %s" % "".join(missing))
@@ -346,14 +417,41 @@ def build(pack_path, preview_dir=None, quiet=False):
         if preview_dir:
             im.save(os.path.join(preview_dir, "sp." + sid + ".png"))
     items = {}
-    for iid, draw in ITEMS.items():
+    for iid, it in ITEMS.items():
         s = Scene(_seed("it." + iid))
-        draw(s)
+        it["draw"](s)
         im = hand.render(s.out, 0, 0, 96, 96)
         imgs["it." + iid] = hand.webp(im, 90)
         items[iid] = dict(img="it." + iid)
         if preview_dir:
             im.save(os.path.join(preview_dir, "it." + iid + ".png"))
+        if it["name"]:
+            items[iid]["name"] = it["name"]
+            if it["desc"]:
+                items[iid]["desc"] = it["desc"]
+            zw, zh = it["zsize"]
+            if it["zoom"] is not None:
+                z = Scene(_seed("itz." + iid))
+                it["zoom"](z)
+                zim = hand.render(z.out, 0, 0, zw, zh)
+            else:
+                z = Scene(_seed("it." + iid))
+                it["draw"](z)
+                zim = hand.render(z.out, 0, 0, 96, 96, scale=5)
+            imgs["itz." + iid] = hand.webp(zim, 88)
+            items[iid]["big"] = "itz." + iid
+            if preview_dir:
+                zim.save(os.path.join(preview_dir, "itz." + iid + ".png"))
+            if it["back"] is not None:
+                b = Scene(_seed("itb." + iid))
+                it["back"](b)
+                bim = hand.render(b.out, 0, 0, zw, zh)
+                imgs["itb." + iid] = hand.webp(bim, 88)
+                items[iid]["back"] = "itb." + iid
+                if preview_dir:
+                    bim.save(os.path.join(preview_dir, "itb." + iid + ".png"))
+        elif it["desc"] or it["zoom"] is not None or it["back"] is not None:
+            raise ValueError("item %s: a text or a large picture needs a name" % iid)
 
     index, blobs, off = {}, [], 0
     for iid, data in imgs.items():
@@ -361,6 +459,10 @@ def build(pack_path, preview_dir=None, quiet=False):
         blobs.append(data)
         off += len(data)
     root = dict(v=1, start=START, stages=STAGES, views=views, items=items, puzzles=PUZZLES, mazes=MAZES, init=INIT, imgs=index)
+    # only episode 2 on has these, so that the first pack builds exactly as before
+    for k, val in (("asks", ASKS), ("combos", COMBOS), ("meta", META)):
+        if val:
+            root[k] = val
     js = json.dumps(root, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     plain = b"EIP1" + struct.pack(">I", len(js)) + js + b"".join(blobs)
 
