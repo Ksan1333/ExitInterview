@@ -20,7 +20,7 @@
 | 部分 | 技術 |
 | --- | --- |
 | アプリ | Kotlin 2.0.21、Jetpack Compose、minSdk 26（Android 8.0）、横画面 |
-| サーバー | AWS Lambda（関数URL）＋ DynamoDB、ap-northeast-1（東京。2026-11-28 にシドニーから移した） |
+| サーバー | AWS Lambda（関数URL）＋ DynamoDB、ap-northeast-1（東京。2026-11-28 にシドニーから変えた。移し方は「東京へ移す」） |
 | 同期 | どちらかが操作している間は0.5秒ごと、静かなときは1秒ごとの問い合わせ（接続は使い回す）。操作は手元ですぐ反映し、すぐサーバーへ送る |
 
 ## ビルド（Android Studio）
@@ -117,7 +117,7 @@ KsanHub の一覧（`Ksan1333/scoop-bucket` の `catalog.json`）では、サー
 シドニー（ap-southeast-2）から東京へ移すと、1 回の通信が約 0.27 秒から 0.04〜0.08 秒になります（この PC から測った値）。関数の URL は変わるので、新しいアドレスの APK が要ります。
 
 1. KsanHub の「Exit Interview（部屋サーバー）」で「CloudShell で配置」を押し、コピーされたコマンドを CloudShell に貼り付ける（東京では初めての配置なので、KsanHub の「AWS に配置」ではできない）。最後に「リージョン: ap-northeast-1」と新しい URL が出る。
-2. 続けて KsanHub の「AWS に配置」を 1 回押す（中身は同じ。KsanHub が東京の URL を覚え、「配置済み・最新」の判定が東京を見るようになる）。
+2. 続けて PC の KsanHub で「AWS に配置」を 1 回押す（中身は同じ。KsanHub が東京の URL を覚え、「配置済み・最新」の判定が東京を見るようになる。それまでは前のシドニーを見るので「更新あり」と出る）。
 3. 新しいアドレス（`/k/` の前まで）を `server-base.txt`（控えは `Documents\Claude\.exitinterview\server-base.txt`）に書き、次の版の APK を作る（Release）。
 4. 2人とも新しい APK に入れ替えたら、シドニーに残ったものを消す。CloudShell で `export EI_REGION=ap-southeast-2` を実行してから、`server/remove.sh` の中身を貼り付ける。東京のサーバーと共通の IAM ロールは残る。
 
